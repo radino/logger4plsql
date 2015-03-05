@@ -213,6 +213,30 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     -- would be nice to have bitwise shifts in PL/SQL: *2 => << 1
     RETURN x_n1 + x_n2 - 2 * bitand(x_n1, x_n2);
   END bit_xor;
+  
+  /* Function translates 3-valued BOOLEAN to NUMBER
+  * @param x_boolean A boolean value
+  * @return The translated boolean to integer
+  *         {*} 0 when the given value is FALSE
+  *         {*} 1 when the given value is TRUE
+  *         {*} NULL, otherwise
+  */
+  FUNCTION bool_to_int(x_boolean IN BOOLEAN) RETURN NUMBER IS
+  BEGIN
+    RETURN CASE x_boolean WHEN TRUE THEN 1 WHEN FALSE THEN 0 END;
+  END bool_to_int;
+
+  /* Function translates an NUMBER to BOOLEAN
+  * @param x_number A number value.
+  * @return The translated number to boolean
+  *         {*} FALSE when the given value is 0
+  *         {*} TRUE when the given value is 1
+  *         {*} NULL, otherwise
+  */
+  FUNCTION int_to_bool(x_number IN NUMBER) RETURN BOOLEAN IS
+  BEGIN
+    RETURN CASE x_number WHEN 1 THEN TRUE WHEN 0 THEN FALSE END;
+  END int_to_bool; 
 
   /**
   * Funtion creates a XML string containing given parameters.
@@ -354,7 +378,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                                x_initialized IN BOOLEAN) IS
   BEGIN
     IF x_initialized THEN
-      dbms_session.set_context(x_ctx, c_init_param, sys.diutil.bool_to_int(x_initialized));
+      -- $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bool_to_int',  'YES');
+      -- $END
+      dbms_session.set_context(x_ctx, c_init_param, bool_to_int(x_initialized));
     ELSE
       dbms_session.clear_context(x_ctx, c_init_param);
     END IF;
@@ -516,9 +542,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   PROCEDURE set_session_ctx_usage(x_usage IN BOOLEAN) IS
   BEGIN
+    -- $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bool_to_int',  'YES');
+    -- $END
     dbms_session.set_context(c_parameters_ctx(c_session_flag),
                              c_session_usage_param,
-                             sys.diutil.bool_to_int(x_usage));
+                             bool_to_int(x_usage));
   END set_session_ctx_usage;
 
   /**
@@ -925,7 +953,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
         raise_application_error(-20001, 'No such appender');
     END;
 
-    l_additivity := sys.diutil.bool_to_int(x_additivity);
+    -- $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bool_to_int',  'YES');
+    -- $END
+    l_additivity := bool_to_int(x_additivity);
                 
     UPDATE t_logger l
        SET l.appenders = bit_or(l.appenders, l_code), l.additivity = l_additivity
@@ -978,7 +1008,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
      WHERE ua.SCHEMA = c_user
        AND ua.app = l_app;
 
-    l_additivity := sys.diutil.bool_to_int(x_additivity);
+    -- $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bool_to_int',  'YES');
+    -- $END
+    l_additivity := bool_to_int(x_additivity);
 
     UPDATE t_logger l
        SET l.additivity = l_additivity
@@ -1090,9 +1122,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_appenders := bit_or(l_appenders, l_code);
     dbms_session.set_context(c_logger_names_ctx(c_session_flag), l_hlogger, x_logger_name);
     dbms_session.set_context(c_logger_appenders_ctx(c_session_flag), l_hlogger, l_appenders);
+    -- $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bool_to_int',  'YES');
+    -- $END
     dbms_session.set_context(c_additivity_ctx(c_session_flag),
                              l_hlogger,
-                             sys.diutil.bool_to_int(x_additivity));
+                             bool_to_int(x_additivity));
   END add_session_appender;
 
   /**
@@ -1109,9 +1143,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_appenders := nvl(sys_context(c_logger_appenders_ctx(c_session_flag), l_hlogger), 0);
     dbms_session.set_context(c_logger_names_ctx(c_session_flag), l_hlogger, x_logger_name);
     dbms_session.set_context(c_logger_appenders_ctx(c_session_flag), l_hlogger, l_appenders);
+    -- $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bool_to_int',  'YES');
+    -- $END
     dbms_session.set_context(c_additivity_ctx(c_session_flag),
                              l_hlogger,
-                             sys.diutil.bool_to_int(x_additivity));
+                             bool_to_int(x_additivity));
   END set_session_additivity;
 
   /**
