@@ -12,7 +12,7 @@ rem   tnsnames: orcl,
 rem   easy connect: 192.168.1.1:1521/orcl
 rem   easy connect with domain: 192.168.1.1:1521/orcl.acme.com
 rem   tnsnames full:  (DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=192.168.1.1)(PORT=1521))(CONNECT_DATA=(SERVER=DEDICATED)(SERVICE_NAME=orcl)))
-define database=clstr11
+define database=orcl
 
 rem Roles and users settings
 rem ========================

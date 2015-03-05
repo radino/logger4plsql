@@ -1,17 +1,17 @@
 CREATE OR REPLACE PACKAGE BODY logging IS
   /*
   Copyright (c) 2010 Radoslav Golian <radoslav.golian@gmail.com>
-  
+
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
   in the Software without restriction, including without limitation the rights
   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
   copies of the Software, and to permit persons to whom the Software is
   furnished to do so, subject to the following conditions:
-  
+
   The above copyright notice and this permission notice shall be included in
   all copies or substantial portions of the Software.
-  
+
   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -169,9 +169,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                     ''' || x_attribute || ''',
                     ''' || x_value || '''
                 );';
-  
+
     dbms_utility.active_instances(instance_table => l_instance_table, instance_count => l_instance_count);
-  
+
     FOR i IN 1 .. l_instance_table.count LOOP
       BEGIN
         dbms_job.submit(job       => l_job_number,
@@ -184,7 +184,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
         WHEN e_invalid_instance THEN
           NULL;
       END;
-    
+
     END LOOP;
     COMMIT;
   END set_context_on_rac;
@@ -253,7 +253,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     IF x_names.FIRST IS NULL THEN
       RETURN NULL;
     END IF;
-  
+
     FOR i IN x_names.FIRST .. x_names.LAST LOOP
       IF x_values(i) IS NULL THEN
         l_result := l_result || x_values(i) || ': ' || x_names(i) || c_nl;
@@ -295,9 +295,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_call_stack := dbms_utility.format_call_stack();
     -- skip header
     l_header_end := instr(l_call_stack, c_nl, nth => c_stack_body_offset) + c_nl_length;
-  
+
     l_logging_end := instr(l_call_stack, c_nl, instr(l_call_stack, c_package_name, -1, 1));
-  
+
     RETURN substr(l_call_stack, 1, l_header_end) || substr(l_call_stack, l_logging_end + c_nl_length);
   END format_call_stack;
 
@@ -314,11 +314,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       (SCHEMA, app)
     VALUES
       (upper(x_schema), upper(x_app));
-      
+
     $IF logging.ver_ge_11_2 $THEN
       set_context_on_rac(c_global_user_app_ctx, upper(x_schema), upper(x_app));
     $END
-  
+
     dbms_session.set_context(c_global_user_app_ctx, upper(x_schema), upper(x_app));
     COMMIT;
   EXCEPTION
@@ -338,7 +338,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     DELETE FROM t_schema_app ua
      WHERE ua.SCHEMA = upper(x_schema)
        AND ua.app = upper(x_app);
-  
+
     dbms_session.clear_context(c_global_user_app_ctx, upper(x_schema)); -- it's case insensitive, but for clarity..
     COMMIT;
   END remove_schema_from_app;
@@ -370,7 +370,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     IF sys_context(x_ctx, c_init_param) IS NOT NULL THEN
       RETURN TRUE;
     END IF;
-  
+
     RETURN FALSE;
   END is_initialized;
 
@@ -382,12 +382,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     IF is_initialized(c_global_levels_ctx) THEN
       RETURN;
     END IF;
-  
+
     FOR l_row IN (SELECT ll.log_level, ll.severity
                     FROM t_log_level ll) LOOP
       dbms_session.set_context(c_global_levels_ctx, l_row.log_level, l_row.severity);
     END LOOP;
-  
+
     set_initialization(c_global_levels_ctx, TRUE);
   END init_levels;
 
@@ -405,21 +405,21 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     IF x_visibility = c_global_flag AND is_initialized(c_global_appenders_ctx) THEN
       RETURN;
     END IF;
-  
+
     l_ctx_suffix := CASE x_visibility WHEN c_global_flag THEN '_G' ELSE '_L' END;
-  
+
     FOR l_row IN (SELECT a.appender, a.code, a.base_context_name
                     FROM t_appender a) LOOP
-    
+
       l_current_appender_ctx := l_row.base_context_name || l_ctx_suffix;
-    
+
       -- there is no session context for appenders
       IF x_visibility = c_global_flag THEN
         dbms_session.set_context(c_global_appenders_ctx, l_row.appender, l_row.base_context_name);
       END IF;
-    
+
       dbms_session.set_context(l_current_appender_ctx, 'DEFAULT#CODE', l_row.code);
-    
+
       FOR l_row2 IN (SELECT aa.app, aa.parameter_name, aa.parameter_value
                        FROM t_app_appender aa
                       WHERE aa.appender = l_row.appender) LOOP
@@ -427,10 +427,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                                  l_row2.app || '#' || l_row2.parameter_name,
                                  l_row2.parameter_value);
       END LOOP;
-    
+
       set_initialization(l_current_appender_ctx, TRUE);
     END LOOP;
-  
+
     IF x_visibility = c_global_flag THEN
       set_initialization(c_global_appenders_ctx, TRUE);
     END IF;
@@ -448,14 +448,14 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     IF is_initialized(c_parameters_ctx(x_visibility)) THEN
       RETURN;
     END IF;
-  
+
     FOR l_row IN (SELECT p.app, p.param_name, p.param_value
                     FROM t_param p) LOOP
       dbms_session.set_context(c_parameters_ctx(x_visibility),
                                l_row.app || '#' || l_row.param_name,
                                l_row.param_value);
     END LOOP;
-  
+
     set_initialization(c_parameters_ctx(x_visibility), TRUE);
   END init_params;
 
@@ -477,7 +477,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     IF is_initialized(c_logger_names_ctx(x_visibility)) THEN
       RETURN;
     END IF;
-  
+
     FOR l_row IN (SELECT l.logger, l.log_level, l.appenders, l.additivity
                     FROM t_logger l) LOOP
       l_hlogger := hash_logger_name(l_row.logger);
@@ -486,7 +486,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       dbms_session.set_context(c_logger_appenders_ctx(x_visibility), l_hlogger, l_row.appenders);
       dbms_session.set_context(c_additivity_ctx(x_visibility), l_hlogger, l_row.additivity);
     END LOOP;
-  
+
     set_initialization(c_logger_names_ctx(x_visibility), TRUE);
   END init_loggers;
 
@@ -499,12 +499,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     IF is_initialized(c_global_user_app_ctx) THEN
       RETURN;
     END IF;
-  
+
     FOR l_row IN (SELECT ua.SCHEMA, ua.app
                     FROM t_schema_app ua) LOOP
       dbms_session.set_context(c_global_user_app_ctx, l_row.SCHEMA, l_row.app);
     END LOOP;
-  
+
     set_initialization(c_global_user_app_ctx, TRUE);
   END init_user_app;
 
@@ -583,7 +583,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
         (app, appender, parameter_name, parameter_value)
       VALUES
         (x_app, x_appender, x_parameter_name, x_parameter_value);
-  
+
     $IF (dbms_db_version.version > 11) OR (dbms_db_version.version > 11 AND dbms_db_version.release >= 2) $THEN
       set_context_on_rac(c_global_user_app_ctx, upper(x_schema), upper(x_app), l_instances);
     $END
@@ -593,11 +593,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                          x_app || '#' || x_parameter_name,
                          x_parameter_value);
     $END
-  
+
     dbms_session.set_context(sys_context(c_global_appenders_ctx, x_appender) || '_G',
                              x_app || '#' || x_parameter_name,
                              x_parameter_value);
-  
+
     COMMIT;
   END set_global_appender_param;
 
@@ -712,11 +712,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                                       x_parameter_name IN t_app_appender.parameter_name%TYPE)
     RETURN t_app_appender.parameter_value%TYPE IS
   BEGIN
-  
+
     IF get_session_ctx_usage() THEN
       RETURN get_session_appender_param(x_app, x_appender, x_parameter_name);
     END IF;
-  
+
     RETURN get_global_appender_param(x_app, x_appender, x_parameter_name);
   END get_current_appender_param;
 
@@ -734,7 +734,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     IF get_session_ctx_usage THEN
       RETURN get_session_layout(x_app, x_appender);
     END IF;
-  
+
     RETURN get_global_layout(x_app, x_appender);
   END get_current_layout;
 
@@ -769,18 +769,18 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     LOOP
       l_logger_name := get_nth_logger_name(x_logger_name, i);
       EXIT WHEN l_logger_name IS NULL;
-    
+
       l_hlogger := hash_logger_name(l_logger_name);
-    
+
       l_level := sys_context(x_ctx_name, l_hlogger);
-    
+
       IF l_level IS NOT NULL THEN
         RETURN l_level;
       END IF;
-    
+
       i := i + 1;
     END LOOP;
-  
+
     l_hlogger := hash_logger_name(c_root_logger_name);
     RETURN sys_context(x_ctx_name, l_hlogger);
   END get_level;
@@ -805,17 +805,17 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     LOOP
       l_logger_name := get_nth_logger_name(x_logger_name, i);
       EXIT WHEN l_logger_name IS NULL;
-    
+
       l_hlogger   := hash_logger_name(l_logger_name);
       l_appenders := bit_or(l_appenders, nvl(sys_context(x_app_ctx_name, l_hlogger), 0));
-    
+
       IF sys_context(x_add_ctx_name, l_hlogger) = 0 THEN
         RETURN l_appenders;
       END IF;
-    
+
       i := i + 1;
     END LOOP;
-  
+
     l_hlogger := hash_logger_name(c_root_logger_name);
     RETURN bit_or(l_appenders, nvl(sys_context(x_app_ctx_name, l_hlogger), 0));
   END get_appenders;
@@ -851,11 +851,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   FUNCTION get_current_used_appenders(x_logger_name IN t_logger.logger%TYPE) RETURN t_logger.appenders%TYPE IS
   BEGIN
-  
+
     IF get_session_ctx_usage() THEN
       RETURN get_session_appenders(x_logger_name);
     END IF;
-  
+
     RETURN get_global_appenders(x_logger_name);
   END get_current_used_appenders;
 
@@ -889,7 +889,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     IF get_session_ctx_usage() THEN
       RETURN get_session_level(x_logger_name);
     END IF;
-  
+
     RETURN get_global_level(x_logger_name);
   END get_current_used_level;
 
@@ -910,11 +910,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_additivity t_logger.additivity%TYPE;
   BEGIN
     l_app := get_app(c_user);
-  
+
     IF l_app IS NULL AND c_user NOT IN ('SYS', c_schema_name) THEN
       raise_application_error(-20002, 'You have no privilege to set the appender.');
     END IF;
-  
+
     BEGIN
       SELECT a.code
         INTO l_code
@@ -924,35 +924,35 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       WHEN no_data_found THEN
         raise_application_error(-20001, 'No such appender');
     END;
-  
+
     l_additivity := sys.diutil.bool_to_int(x_additivity);
-  
+                
     UPDATE t_logger l
        SET l.appenders = bit_or(l.appenders, l_code), l.additivity = l_additivity
      WHERE l.logger = x_logger_name
     RETURNING appenders INTO l_appenders;
-  
+
     IF SQL%NOTFOUND THEN
       l_appenders := l_code;
-    
+
       INSERT INTO t_logger
         (logger, appenders, additivity)
       VALUES
         (x_logger_name, l_appenders, l_additivity);
     END IF;
-  
+
     l_hlogger := hash_logger_name(x_logger_name);
-  
+
     $IF logging.ver_ge_11_2 $THEN
       set_context_on_rac(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name);
       set_context_on_rac(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders);
       set_context_on_rac(c_additivity_ctx(c_global_flag), l_hlogger, l_additivity);
     $END
-  
+
     dbms_session.set_context(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name);
     dbms_session.set_context(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders);
     dbms_session.set_context(c_additivity_ctx(c_global_flag), l_hlogger, l_additivity);
-  
+
     COMMIT;
   END add_global_appender;
 
@@ -971,41 +971,41 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_additivity t_logger.additivity%TYPE;
   BEGIN
     l_app := get_app(c_user);
-  
+
     SELECT NULL
       INTO l_dummy
       FROM t_schema_app ua
      WHERE ua.SCHEMA = c_user
        AND ua.app = l_app;
-  
+
     l_additivity := sys.diutil.bool_to_int(x_additivity);
-  
+
     UPDATE t_logger l
        SET l.additivity = l_additivity
      WHERE l.logger = x_logger_name
     RETURNING appenders INTO l_appenders;
-  
+
     IF SQL%NOTFOUND THEN
       l_appenders := 0;
-    
+
       INSERT INTO t_logger
         (logger, appenders, additivity)
       VALUES
         (x_logger_name, l_appenders, l_additivity);
     END IF;
-  
+
     l_hlogger := hash_logger_name(x_logger_name);
-  
+
     $IF logging.ver_ge_11_2 $THEN
       set_context_on_rac(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name);
       set_context_on_rac(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders);
       set_context_on_rac(c_additivity_ctx(c_global_flag), l_hlogger, l_additivity);
     $END
-      
+
     dbms_session.set_context(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name);
     dbms_session.set_context(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders);
     dbms_session.set_context(c_additivity_ctx(c_global_flag), l_hlogger, l_additivity);
-  
+
     COMMIT;
   END set_global_additivity;
 
@@ -1023,11 +1023,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_hlogger   hash_type;
   BEGIN
     l_app := get_app(c_user);
-  
+
     IF l_app IS NULL AND c_user NOT IN ('SYS', c_schema_name) THEN
       raise_application_error(-20002, 'You have no privilege to set the appender.');
     END IF;
-  
+
     BEGIN
       SELECT a.code
         INTO l_code
@@ -1037,27 +1037,27 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       WHEN no_data_found THEN
         raise_application_error(-20001, 'No such appender');
     END;
-  
+
     -- unset appenders
     UPDATE t_logger l
        SET l.appenders = bit_xor(l.appenders, l_code)
      WHERE l.logger = x_logger_name
        AND bitand(l.appenders, l_code) > 0
     RETURNING appenders INTO l_appenders;
-  
+
     -- an appender with given code was set for given logger
     IF SQL%FOUND THEN
       l_hlogger := hash_logger_name(x_logger_name);
-    
+
       $IF logging.ver_ge_11_2 $THEN
         set_context_on_rac(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name);
         set_context_on_rac(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders);
       $END
-    
+
       dbms_session.set_context(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name);
       dbms_session.set_context(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders);
     END IF;
-  
+
     COMMIT;
   END remove_global_appender;
 
@@ -1083,9 +1083,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       WHEN no_data_found THEN
         raise_application_error(-20001, 'No such appender');
     END;
-  
+
     l_hlogger := hash_logger_name(x_logger_name);
-  
+
     l_appenders := nvl(sys_context(c_logger_appenders_ctx(c_session_flag), l_hlogger), 0);
     l_appenders := bit_or(l_appenders, l_code);
     dbms_session.set_context(c_logger_names_ctx(c_session_flag), l_hlogger, x_logger_name);
@@ -1137,15 +1137,15 @@ CREATE OR REPLACE PACKAGE BODY logging IS
         (app, param_name, param_value)
       VALUES
         (x_app, x_param_name, x_param_value);
-  
+
     dbms_session.set_context(c_parameters_ctx(c_global_flag), x_app || '#' || x_param_name, x_param_value);
-  
+
     $IF logging.ver_ge_11_2 $THEN
       set_context_on_rac(c_parameters_ctx(c_global_flag),
                          x_app || '#' || x_param_name,
                          x_param_value);
     $END
-  
+
     COMMIT;
   END set_global_parameter;
 
@@ -1198,7 +1198,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     IF get_session_ctx_usage() THEN
       RETURN get_session_parameter(x_app, x_param_name);
     END IF;
-  
+
     RETURN get_global_parameter(x_app, x_param_name);
   END get_current_parameter;
 
@@ -1222,10 +1222,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       WHEN no_data_found THEN
         raise_application_error(-20001, 'No such appender');
     END;
-  
+
     l_hlogger   := hash_logger_name(x_logger_name);
     l_appenders := nvl(sys_context(c_logger_appenders_ctx(c_session_flag), l_hlogger), 0);
-  
+
     IF bitand(l_appenders, l_code) > 0 THEN
       l_appenders := bit_xor(l_appenders, l_code);
       dbms_session.set_context(c_logger_appenders_ctx(c_session_flag), l_hlogger, l_appenders);
@@ -1245,33 +1245,35 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_hlogger   hash_type;
   BEGIN
     l_app := get_app(c_user);
-  
+
     SELECT NULL
       INTO l_dummy
       FROM t_schema_app ua
      WHERE ua.SCHEMA = c_user
        AND ua.app = l_app;
-  
-    UPDATE t_logger l
-       SET l.log_level = x_log_level
-     WHERE l.logger = x_logger_name;
-  
-    IF SQL%NOTFOUND THEN
-      INSERT INTO t_logger
+       
+    MERGE INTO t_logger l
+    USING (SELECT NULL
+             FROM dual) dummy
+    ON (l.logger = x_logger_name)
+    WHEN MATCHED THEN
+      UPDATE
+         SET l.log_level = log_level
+    WHEN NOT MATCHED THEN
+      INSERT
         (logger, log_level)
       VALUES
         (x_logger_name, x_log_level);
-    END IF;
-  
+
     l_hlogger := hash_logger_name(x_logger_name);
     dbms_session.set_context(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name);
     dbms_session.set_context(c_logger_levels_ctx(c_global_flag), l_hlogger, x_log_level);
-  
+
     $IF logging.ver_ge_11_2 $THEN
       set_context_on_rac(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name);
       set_context_on_rac(c_logger_levels_ctx(c_global_flag), l_hlogger, x_log_level);
     $END
-  
+
     COMMIT;
   END set_global_level;
 
@@ -1350,26 +1352,26 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   PROCEDURE enqueue_into_cyclic_buffer(x_app IN VARCHAR2, x_message IN VARCHAR2) IS
   BEGIN
-  
+
     -- if the size is NULL, buffer was not initialized
     IF g_mail_buffer.buff_size IS NULL THEN
       init_email_cyclic_buffer(x_app);
     END IF;
-  
+
     -- enqueque the message
     g_mail_buffer.buffer(g_mail_buffer.tail) := x_message;
-  
+
     -- cyclic incrementation of the tail
     IF g_mail_buffer.tail = g_mail_buffer.buff_size THEN
       g_mail_buffer.tail := 1;
     ELSE
       g_mail_buffer.tail := g_mail_buffer.tail + 1;
     END IF;
-  
+
     -- if the tail position and the head position is the same
     -- then the buffer is full
     IF g_mail_buffer.head = g_mail_buffer.tail THEN
-    
+
       -- discard the first message by cyclic incrementation of the head position
       IF g_mail_buffer.head = g_mail_buffer.buff_size THEN
         g_mail_buffer.head := 1;
@@ -1386,7 +1388,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_last_head PLS_INTEGER;
   BEGIN
     l_last_head := g_mail_buffer.head;
-  
+
     IF g_mail_buffer.head = g_mail_buffer.buff_size THEN
       g_mail_buffer.head := 1;
     ELSE
@@ -1441,18 +1443,18 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       IF x_method IS NOT NULL THEN
         l_stack_object := l_stack_object || '.' || upper(x_method);
       END IF;
-      
+
       -- if schema was not determined, logging was called from anonymous block.
       IF l_obj_schema IS NULL THEN
         l_obj_schema := c_user;
-      END IF; 
-    
+      END IF;
+
       o_app  := get_app(l_obj_schema);
-      
+
       o_logger := o_app || '.' || l_stack_object;
     END IF;
-    
-  END parse_stack; 
+
+  END parse_stack;
 
   /**
   * Returns a logger configuration for given method.
@@ -1466,11 +1468,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_logger       logger_type;
   BEGIN
     parse_stack(l_logger.logger, l_logger.app, x_method);
-    l_logger.always_from_ctx := x_always_from_ctx;  
-    
+    l_logger.always_from_ctx := x_always_from_ctx;
+
     l_logger.log_level_severity := get_level_severity(get_current_used_level(l_logger.logger));
-    l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);  
-  
+    l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);
+
     RETURN l_logger;
   END get_logger;
 
@@ -1482,13 +1484,13 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   FUNCTION get_root_logger(x_always_from_ctx IN ctx_boolean DEFAULT c_false) RETURN logger_type IS
     l_logger logger_type;
-  BEGIN   
-    parse_stack(l_logger.logger, l_logger.app);     
+  BEGIN
+    parse_stack(l_logger.logger, l_logger.app);
     l_logger.logger          := c_root_logger_name;
     l_logger.always_from_ctx := x_always_from_ctx;
-    
+
     l_logger.log_level_severity := get_level_severity(get_current_used_level(l_logger.logger));
-    l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);  
+    l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);
     RETURN l_logger;
   END get_root_logger;
 
@@ -1505,7 +1507,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_logger.logger          := l_logger.app;
     l_logger.always_from_ctx := x_always_from_ctx;
     l_logger.log_level_severity := get_level_severity(get_current_used_level(l_logger.logger));
-    l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);  
+    l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);
     RETURN l_logger;
   END get_app_logger;
 
@@ -1522,7 +1524,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_logger.logger          := l_logger.app || '.' || c_user;
     l_logger.always_from_ctx := x_always_from_ctx;
     l_logger.log_level_severity := get_level_severity(get_current_used_level(l_logger.logger));
-    l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);  
+    l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);
     RETURN l_logger;
   END get_schema_logger;
 
@@ -1544,53 +1546,53 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   BEGIN
     l_host := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_HOST');
     l_from := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_FROM');
-  
+
     l_conn := utl_smtp.open_connection(host       => l_host,
                                        port       => get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_PORT'),
                                        tx_timeout => get_current_appender_param(x_app,
                                                                                 'SMTP',
                                                                                 'SEND_MAIL_TIMEOUT'));
-  
+
     l_reply := utl_smtp.helo(l_conn, l_host);
-  
+
     IF l_reply.code <> 200 THEN
       NULL;
     END IF;
-  
+
     l_reply := utl_smtp.mail(l_conn, l_from);
-  
+
     IF l_reply.code <> 200 THEN
       NULL;
     END IF;
-  
+
     l_to  := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_TO');
     l_cc  := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_CC');
     l_bcc := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_BCC');
-  
+
     IF l_to IS NOT NULL THEN
       l_csv_list := l_to || ',';
     END IF;
-  
+
     IF l_cc IS NOT NULL THEN
       l_csv_list := l_csv_list || l_cc || ',';
     END IF;
-  
+
     IF l_bcc IS NOT NULL THEN
       l_csv_list := l_csv_list || l_bcc || ',';
     END IF;
-  
+
     l_offset := 1;
     LOOP
       l_comma_pos := instr(l_csv_list, ',', l_offset);
       EXIT WHEN l_comma_pos = 0;
-    
+
       l_reply := utl_smtp.rcpt(l_conn, substr(l_csv_list, l_offset, l_comma_pos - l_offset));
-    
+
       l_offset := l_comma_pos + 1;
     END LOOP;
-  
+
     utl_smtp.open_data(l_conn);
-  
+
     utl_smtp.write_data(l_conn, 'Content-Type: text/plain' || utl_tcp.crlf);
     utl_smtp.write_data(l_conn, 'From: ' || l_from || utl_tcp.crlf);
     utl_smtp.write_data(l_conn, 'To: ' || l_to || utl_tcp.crlf);
@@ -1598,7 +1600,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     utl_smtp.write_data(l_conn,
                         'Subject: ' || get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_SUBJECT') ||
                         utl_tcp.crlf);
-  
+
     WHILE NOT is_cyclic_buffer_empty() LOOP
       utl_smtp.write_data(l_conn,
                           --                          convert(
@@ -1610,15 +1612,15 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            f_get_current_appender_param(x_app, 'SMTP', 'send_mail_ora_charset'),
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            utl_encode.base64)*/);
     END LOOP;
-  
+
     utl_smtp.close_data(l_conn);
-  
+
     l_reply := utl_smtp.quit(l_conn);
-  
+
     IF l_reply.code <> 200 THEN
       NULL;
     END IF;
-  
+
   END send_buffer;
 
   /**
@@ -1640,19 +1642,19 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_trigger_level t_log_level.log_level%TYPE;
   BEGIN
     l_layout := get_current_layout(x_app, c_smtp_appender);
-  
+
     enqueue_into_cyclic_buffer(x_app, format_message(x_message, l_layout, x_logger_name, x_level) || c_nl);
-  
+
     IF x_log_backtrace THEN
       enqueue_into_cyclic_buffer(x_app, dbms_utility.format_error_stack() || dbms_utility.format_error_backtrace() || c_nl);
     END IF;
-  
+
     IF x_call_stack THEN
       enqueue_into_cyclic_buffer(x_app, format_call_stack() || c_nl);
     END IF;
-  
+
     l_trigger_level := get_current_appender_param(x_app, 'SMTP', 'TRIGGER_LEVEL');
-  
+
     IF get_level_severity(x_level) >= get_level_severity(l_trigger_level) THEN
       send_buffer(x_app);
     END IF;
@@ -1676,13 +1678,13 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_layout t_app_appender.parameter_value%TYPE;
   BEGIN
     l_layout := get_current_layout(x_app, c_dbms_output_appender);
-  
+
     dbms_output.put_line(format_message(x_message, l_layout, x_logger_name, x_level));
-  
+
     IF x_log_backtrace THEN
       dbms_output.put_line(dbms_utility.format_error_stack || dbms_utility.format_error_backtrace);
     END IF;
-  
+
     IF x_call_stack THEN
       dbms_output.put_line(format_call_stack());
     END IF;
@@ -1711,17 +1713,17 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_formated_message t_log.message%TYPE;
   BEGIN
     l_layout := get_current_layout(x_app, c_table_appender);
-  
+
     IF x_log_backtrace THEN
       l_backtrace := dbms_utility.format_error_stack || dbms_utility.format_error_backtrace;
     END IF;
-  
+
     IF x_call_stack THEN
       l_call_stack := format_call_stack();
     END IF;
-  
+
     l_formated_message := format_message(x_message, l_layout, x_logger_name, x_level);
-  
+
     INSERT INTO t_log
       (id, logger, message, log_date, call_stack, backtrace, log_level)
     VALUES
@@ -1752,32 +1754,32 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     IF x_logger.always_from_ctx = c_true THEN
       x_logger.log_level_severity := get_level_severity(get_current_used_level(x_logger.logger));
     END IF;
-  
+
     IF x_logger.log_level_severity > get_level_severity(x_level) THEN
       RETURN;
     END IF;
-  
+
     IF x_logger.always_from_ctx = c_true THEN
       x_logger.enabled_appenders := get_current_used_appenders(x_logger.logger);
     END IF;
-  
+
     --    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_appender_code', 'YES');
     --    $END
     IF bitand(x_logger.enabled_appenders, get_appender_code(c_table_appender)) > 0 THEN
       log_table(x_logger.app, x_logger.logger, x_level, x_message, x_log_call_stack, x_log_backtrace);
     END IF;
-  
+
     --$IF  dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_appender_code', 'YES');
     --$END
     IF bitand(x_logger.enabled_appenders, get_appender_code(c_dbms_output_appender)) > 0 THEN
       log_stdout(x_logger.app, x_logger.logger, x_level, x_message, x_log_call_stack, x_log_backtrace);
     END IF;
-  
+
     --$IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_appender_code', 'YES'); $END
     IF bitand(x_logger.enabled_appenders, get_appender_code(c_smtp_appender)) > 0 THEN
       log_smtp(x_logger.app, x_logger.logger, x_level, x_message, x_log_call_stack, x_log_backtrace);
     END IF;
-  
+
   END log;
 
   /**
