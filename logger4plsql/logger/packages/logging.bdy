@@ -51,6 +51,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
   /** SMTP appender: Cyclic buffer global variable. */
   g_mail_buffer mail_cyclic_buffer_type;
+  
+  /** Hash for the root logger */
+  g_root_logger_hash hash_type;
 
   /** Type for visibility: session or global */
   SUBTYPE visibility_type IS PLS_INTEGER RANGE 1 .. 2;
@@ -92,7 +95,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
   /** Root logger name. */
   c_root_logger_name CONSTANT ctx_namespace_type := '/';
-
+  
   /** Key for flag indicating whether session context is in use. */
   c_session_usage_param CONSTANT ctx_attribute_type := 'USAGE';
 
@@ -809,7 +812,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       i := i + 1;
     END LOOP;
 
-    l_hlogger := hash_logger_name(c_root_logger_name);
+    l_hlogger := g_root_logger_hash;
     RETURN sys_context(x_ctx_name, l_hlogger);
   END get_level;
 
@@ -844,7 +847,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       i := i + 1;
     END LOOP;
 
-    l_hlogger := hash_logger_name(c_root_logger_name);
+    l_hlogger := g_root_logger_hash;
     RETURN bit_or(l_appenders, nvl(sys_context(x_app_ctx_name, l_hlogger), 0));
   END get_appenders;
 
@@ -2047,6 +2050,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   END copy_global_to_session;
 
 BEGIN
+  -- $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name', 'YES');
+  --$END
+  g_root_logger_hash := hash_logger_name(c_root_logger_name);
   init_user_app;
   init_params(c_global_flag);
   init_levels;
