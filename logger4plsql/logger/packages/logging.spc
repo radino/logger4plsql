@@ -6,7 +6,7 @@ CREATE OR REPLACE PACKAGE logging IS
   * {*} email, gtalk(XMPP)  radoslav.golian@gmail.com, rgolian@gmail.com
   * {*} facebook            http://www.facebook.com/radoslav.golian
   * {*} twitter             http://twitter.com/radoslavgolian
-  * (*) project page        http://sourceforge.net/projects/logger4plsql
+  * (*) project page        https://github.com/radino/logger4plsql/
   * @author Radoslav Golian
   */
 
@@ -15,6 +15,9 @@ CREATE OR REPLACE PACKAGE logging IS
 
   /** Type for parameter values. */
   TYPE param_values_type IS TABLE OF VARCHAR2(32767);
+
+  /** Type for log message */
+  SUBTYPE message_type IS VARCHAR2(32767);
 
   /** Subtype for attribute name. */
   SUBTYPE ctx_attribute_type IS global_context.attribute%TYPE;
@@ -41,13 +44,13 @@ CREATE OR REPLACE PACKAGE logging IS
   c_false CONSTANT ctx_boolean := 'F';
 
   /** Constant indicating whether current database version is 11.2 or greater. */
-  ver_ge_11_2 CONSTANT BOOLEAN := 
+  ver_ge_11_2 CONSTANT BOOLEAN :=
     $IF (dbms_db_version.version > 11) -- greater then 11
      OR (dbms_db_version.version = 11 AND dbms_db_version.release >= 2) -- or equal to 11.2
-    $THEN TRUE 
+    $THEN TRUE
     $ELSE FALSE
     $END;
-    
+
   /** Type for settings of all appenders. */
   TYPE appenders_params_type IS TABLE OF appender_params_type INDEX BY PLS_INTEGER; -- t_appender.code;
 
@@ -320,7 +323,7 @@ CREATE OR REPLACE PACKAGE logging IS
   * @param x_log_call_stack Flag, whether log callstack.
   */
   PROCEDURE trace(x_logger         IN OUT NOCOPY logger_type,
-                  x_message        IN VARCHAR2 DEFAULT SQLERRM,
+                  x_message        IN message_type DEFAULT SQLERRM,
                   x_log_backtrace  IN BOOLEAN DEFAULT FALSE,
                   x_log_call_stack IN BOOLEAN DEFAULT TRUE);
 
@@ -332,7 +335,7 @@ CREATE OR REPLACE PACKAGE logging IS
   * @param x_log_call_stack Flag, whether log callstack.
   */
   PROCEDURE info(x_logger         IN OUT NOCOPY logger_type,
-                 x_message        IN VARCHAR2 DEFAULT SQLERRM,
+                 x_message        IN message_type DEFAULT SQLERRM,
                  x_log_backtrace  IN BOOLEAN DEFAULT FALSE,
                  x_log_call_stack IN BOOLEAN DEFAULT TRUE);
 
@@ -344,7 +347,7 @@ CREATE OR REPLACE PACKAGE logging IS
   * @param x_log_call_stack Flag, whether log callstack.
   */
   PROCEDURE debug(x_logger         IN OUT NOCOPY logger_type,
-                  x_message        IN VARCHAR2 DEFAULT SQLERRM,
+                  x_message        IN message_type DEFAULT SQLERRM,
                   x_log_backtrace  IN BOOLEAN DEFAULT FALSE,
                   x_log_call_stack IN BOOLEAN DEFAULT TRUE);
 
@@ -356,7 +359,7 @@ CREATE OR REPLACE PACKAGE logging IS
   * @param x_log_call_stack Flag, whether log callstack.
   */
   PROCEDURE warn(x_logger         IN OUT NOCOPY logger_type,
-                 x_message        IN VARCHAR2 DEFAULT SQLERRM,
+                 x_message        IN message_type DEFAULT SQLERRM,
                  x_log_backtrace  IN BOOLEAN DEFAULT TRUE,
                  x_log_call_stack IN BOOLEAN DEFAULT TRUE);
 
@@ -368,7 +371,7 @@ CREATE OR REPLACE PACKAGE logging IS
   * @param x_log_call_stack Flag, whether log callstack.
   */
   PROCEDURE error(x_logger         IN OUT NOCOPY logger_type,
-                  x_message        IN VARCHAR2 DEFAULT SQLERRM,
+                  x_message        IN message_type DEFAULT SQLERRM,
                   x_log_backtrace  IN BOOLEAN DEFAULT TRUE,
                   x_log_call_stack IN BOOLEAN DEFAULT TRUE);
 
@@ -380,7 +383,7 @@ CREATE OR REPLACE PACKAGE logging IS
   * @param x_log_call_stack Flag, whether log callstack.
   */
   PROCEDURE fatal(x_logger         IN OUT NOCOPY logger_type,
-                  x_message        IN VARCHAR2 DEFAULT SQLERRM,
+                  x_message        IN message_type DEFAULT SQLERRM,
                   x_log_backtrace  IN BOOLEAN DEFAULT TRUE,
                   x_log_call_stack IN BOOLEAN DEFAULT TRUE);
 

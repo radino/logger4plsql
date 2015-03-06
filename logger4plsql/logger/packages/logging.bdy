@@ -28,7 +28,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * {*} email, gtalk(XMPP)  radoslav.golian@gmail.com, rgolian@gmail.com
   * {*} facebook            http://www.facebook.com/radoslav.golian
   * {*} twitter             http://twitter.com/radoslavgolian
-  * (*) project page        http://sourceforge.net/projects/logger4plsql
+  * (*) project page        https://github.com/radino/logger4plsql/
   * @author Radoslav Golian
   */
 
@@ -37,7 +37,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
   /** SMTP appender: Type for a cyclic buffer item. */
   SUBTYPE mail_item_type IS VARCHAR2(4000);
-
+  
   /** SMTP appender: Type for cyclic buffer. */
   TYPE mail_table_type IS TABLE OF mail_item_type;
 
@@ -167,15 +167,19 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     PRAGMA EXCEPTION_INIT(e_invalid_instance, -23428);
     PRAGMA AUTONOMOUS_TRANSACTION;
   BEGIN
+    dbms_utility.active_instances(instance_table => l_instance_table, instance_count => l_instance_count);
+
+    IF l_instance_count = 0 THEN 
+      RETURN;
+    END IF;
+
     l_what := 'logging.set_context(
                     ''' || x_namespace || ''',
                     ''' || x_attribute || ''',
                     ''' || x_value || '''
                 );';
 
-    dbms_utility.active_instances(instance_table => l_instance_table, instance_count => l_instance_count);
-
-    FOR i IN 1 .. l_instance_table.count LOOP
+    FOR i IN 1 .. l_instance_count LOOP
       BEGIN
         dbms_job.submit(job       => l_job_number,
                         what      => l_what,
@@ -1348,7 +1352,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @param x_level Log level.
   * @return Formated message.
   */
-  FUNCTION format_message(x_message     IN VARCHAR2,
+  FUNCTION format_message(x_message     IN message_type,
                           x_layout      IN t_app_appender.parameter_value%TYPE,
                           x_logger_name IN t_logger.logger%TYPE,
                           x_level       IN t_logger.log_level%TYPE) RETURN VARCHAR2 IS
@@ -1389,7 +1393,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @param x_app Application.
   * @param x_message Message.
   */
-  PROCEDURE enqueue_into_cyclic_buffer(x_app IN VARCHAR2, x_message IN VARCHAR2) IS
+  PROCEDURE enqueue_into_cyclic_buffer(x_app IN VARCHAR2, x_message IN message_type) IS
   BEGIN
 
     -- if the size is NULL, buffer was not initialized
@@ -1674,7 +1678,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   PROCEDURE log_smtp(x_app           IN t_app_appender.app%TYPE,
                      x_logger_name   IN t_logger.logger%TYPE,
                      x_level         IN t_log_level.log_level%TYPE,
-                     x_message       IN VARCHAR2,
+                     x_message       IN message_type,
                      x_call_stack    IN BOOLEAN,
                      x_log_backtrace IN BOOLEAN) IS
     l_layout        t_app_appender.parameter_value%TYPE;
@@ -1711,7 +1715,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   PROCEDURE log_stdout(x_app           IN t_app_appender.app%TYPE,
                        x_logger_name   IN t_logger.logger%TYPE,
                        x_level         IN t_log_level.log_level%TYPE,
-                       x_message       IN VARCHAR2,
+                       x_message       IN message_type,
                        x_call_stack    IN BOOLEAN,
                        x_log_backtrace IN BOOLEAN) IS
     l_layout t_app_appender.parameter_value%TYPE;
@@ -1741,7 +1745,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   PROCEDURE log_table(x_app           IN t_app_appender.app%TYPE,
                       x_logger_name   IN t_logger.logger%TYPE,
                       x_level         IN t_log_level.log_level%TYPE,
-                      x_message       IN VARCHAR2,
+                      x_message       IN message_type,
                       x_call_stack    IN BOOLEAN,
                       x_log_backtrace IN BOOLEAN) IS
     PRAGMA AUTONOMOUS_TRANSACTION;
@@ -1786,7 +1790,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   PROCEDURE log(x_level          IN t_log_level.log_level%TYPE,
                 x_logger         IN OUT NOCOPY logger_type,
-                x_message        IN VARCHAR2,
+                x_message        IN message_type,
                 x_log_backtrace  IN BOOLEAN,
                 x_log_call_stack IN BOOLEAN) IS
   BEGIN
@@ -1829,7 +1833,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @param x_log_call_stack Flag, whether log callstack.
   */
   PROCEDURE trace(x_logger         IN OUT NOCOPY logger_type,
-                  x_message        IN VARCHAR2 DEFAULT SQLERRM,
+                  x_message        IN message_type DEFAULT SQLERRM,
                   x_log_backtrace  IN BOOLEAN DEFAULT FALSE,
                   x_log_call_stack IN BOOLEAN DEFAULT TRUE) IS
   BEGIN
@@ -1846,7 +1850,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @param x_log_call_stack Flag, whether log callstack.
   */
   PROCEDURE info(x_logger         IN OUT NOCOPY logger_type,
-                 x_message        IN VARCHAR2 DEFAULT SQLERRM,
+                 x_message        IN message_type DEFAULT SQLERRM,
                  x_log_backtrace  IN BOOLEAN DEFAULT FALSE,
                  x_log_call_stack IN BOOLEAN DEFAULT TRUE) IS
   BEGIN
@@ -1863,7 +1867,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @param x_log_call_stack Flag, whether log callstack.
   */
   PROCEDURE debug(x_logger         IN OUT NOCOPY logger_type,
-                  x_message        IN VARCHAR2 DEFAULT SQLERRM,
+                  x_message        IN message_type DEFAULT SQLERRM,
                   x_log_backtrace  IN BOOLEAN DEFAULT FALSE,
                   x_log_call_stack IN BOOLEAN DEFAULT TRUE) IS
   BEGIN
@@ -1880,7 +1884,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @param x_log_call_stack Flag, whether log callstack.
   */
   PROCEDURE warn(x_logger         IN OUT NOCOPY logger_type,
-                 x_message        IN VARCHAR2 DEFAULT SQLERRM,
+                 x_message        IN message_type DEFAULT SQLERRM,
                  x_log_backtrace  IN BOOLEAN DEFAULT TRUE,
                  x_log_call_stack IN BOOLEAN DEFAULT TRUE) IS
   BEGIN
@@ -1897,7 +1901,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @param x_log_call_stack Flag, whether log callstack.
   */
   PROCEDURE error(x_logger         IN OUT NOCOPY logger_type,
-                  x_message        IN VARCHAR2 DEFAULT SQLERRM,
+                  x_message        IN message_type DEFAULT SQLERRM,
                   x_log_backtrace  IN BOOLEAN DEFAULT TRUE,
                   x_log_call_stack IN BOOLEAN DEFAULT TRUE) IS
   BEGIN
@@ -1914,7 +1918,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @param x_log_call_stack Flag, whether log callstack.
   */
   PROCEDURE fatal(x_logger         IN OUT NOCOPY logger_type,
-                  x_message        IN VARCHAR2 DEFAULT SQLERRM,
+                  x_message        IN message_type DEFAULT SQLERRM,
                   x_log_backtrace  IN BOOLEAN DEFAULT TRUE,
                   x_log_call_stack IN BOOLEAN DEFAULT TRUE) IS
   BEGIN
