@@ -14,7 +14,7 @@ alter table t_logger
   references t_log_level (log_level);
 
 alter table t_logger
-  add constraint ck_logger_additivity check (additivity in (0,1));
+  add constraint chk_logger_additivity check (additivity in (0,1));
 
 comment on table t_logger is 'Settings for logger'
 

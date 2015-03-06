@@ -459,6 +459,22 @@ CREATE OR REPLACE PACKAGE logging IS
   PROCEDURE copy_global_to_session;
 
   /**
+  * Procedure adds an application to the configuration.
+  * @param x_app Application name.
+  * @param x_app_descr Application description.
+  */
+  PROCEDURE add_app(x_app IN t_app.app%TYPE,
+                    x_app_descr IN t_app.app_desc%TYPE);
+                    
+  /**
+  * Procedure removes the given application and all related configuration.
+  * @param x_app Application name.
+  */
+  PROCEDURE remove_app(x_app IN t_app.app%TYPE);
+
+
+
+  /**
   * Procedure sets given attribute of given context to given value.
   * For internal use only. Please do not use.
   * @param x_namespace Name of context
@@ -469,6 +485,7 @@ CREATE OR REPLACE PACKAGE logging IS
   PROCEDURE set_context(x_namespace IN ctx_namespace_type,
                         x_attribute IN ctx_attribute_type,
                         x_value     IN ctx_value_type);
+
 END logging;
 /
 

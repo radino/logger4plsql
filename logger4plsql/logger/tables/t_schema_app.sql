@@ -8,8 +8,12 @@ organization index
 tablespace &index_tablespace_small;
 
 alter table t_schema_app
-  add constraint chck_schema_app_upper
-  check (upper(app)=app and upper(schema)=schema);
+  add constraint chk_schema_app_upper
+  check (upper(schema)=schema);
+
+alter table t_schema_app
+  add constraint fk_schema_app_app foreign key (app)
+  references t_app (app);
 
 comment on table t_schema_app is 'Schema - application mapping';
 

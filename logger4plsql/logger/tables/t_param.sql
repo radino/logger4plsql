@@ -12,8 +12,12 @@ tablespace &table_tablespace_small
 ;
 
 alter table t_param
-  add constraint chck_param_upper
-  check (upper(app)=app and upper(param_name)=param_name);
+  add constraint chk_param_upper
+  check (upper(param_name)=param_name);
+
+alter table t_param
+  add constraint fk_param_app foreign key (app)
+  references t_app (app);
 
 comment on table t_param is 'Parameters for logging system'
 

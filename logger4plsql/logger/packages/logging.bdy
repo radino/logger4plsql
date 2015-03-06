@@ -331,7 +331,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
     RETURN substr(l_call_stack, 1, l_header_end) || substr(l_call_stack, l_logging_end + c_nl_length);
   END format_call_stack;
-
+  
   /**
   * Procedure adds given schema to given application.
   * @param x_app Application name.
@@ -2052,6 +2052,62 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     init_appenders(c_session_flag);
     init_loggers(c_session_flag);
   END copy_global_to_session;
+
+  /**
+  * Procedure adds an application to the configuration.
+  * @param x_app Application name.
+  * @param x_app_descr Application description.
+  */
+  PROCEDURE add_app(x_app IN t_app.app%TYPE,
+                    x_app_descr IN t_app.app_desc%TYPE) IS
+    PRAGMA AUTONOMOUS_TRANSACTION;
+  BEGIN
+    INSERT INTO t_app(app, app_desc)
+    VALUES (x_app, x_app_descr);
+        
+    COMMIT;
+  END add_app;
+
+  /**
+  * Procedure removes the given application and all related configuration.
+  * @param x_app Application name.
+  */
+  PROCEDURE remove_app(x_app IN t_app.app%TYPE) IS
+    PRAGMA AUTONOMOUS_TRANSACTION;
+  BEGIN
+    DELETE FROM t_app_appender aa
+    WHERE aa.app = x_app;
+    
+    DELETE FROM t_schema_app sa
+    WHERE sa.app = x_app;
+
+    DELETE FROM t_param sa
+    WHERE sa.app = x_app;
+
+    DELETE FROM t_logger a
+    WHERE a.logger LIKE x_app || '.%';
+  
+    DELETE FROM t_app a
+    WHERE a.app = x_app;
+
+        
+    COMMIT;
+
+    FOR l_row IN (
+        select gc.namespace, gc.attribute
+          from global_context gc
+         where gc.attribute in
+               (select gc2.attribute
+                  from global_context gc2
+                 where gc2.value like x_app || '.%'
+                   and gc2.namespace = c_logger_names_ctx(c_global_flag))
+            or (gc.value = x_app 
+            and gc.namespace = c_global_user_app_ctx)
+            or (gc.attribute like x_app || '#')
+    ) LOOP
+       dbms_session.clear_context(namespace => l_row.namespace, attribute => l_row.attribute);
+    END LOOP;
+  END remove_app;
 
 BEGIN
   -- $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name', 'YES');

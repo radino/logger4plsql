@@ -15,8 +15,12 @@ alter table t_app_appender
   references t_appender (appender);
 
 alter table t_app_appender
-  add constraint chck_app_appender_upper
-  check (upper(app)=app and upper(appender)=appender and parameter_name=upper(parameter_name));
+  add constraint fk_t_app_appender_app foreign key (app)
+  references t_app (app);
+
+alter table t_app_appender
+  add constraint chk_app_appender_upper
+  check (upper(appender)=appender and parameter_name=upper(parameter_name));
 
 comment on table t_app_appender
   is 'Appender settings for application';
