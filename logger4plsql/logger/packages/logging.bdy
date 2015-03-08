@@ -55,6 +55,14 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   /** Hash for the root logger */
   g_root_logger_hash hash_type;
 
+  -- these elements are defined only if internal debugging is set to TRUE
+  $IF logging_settings.c_precompiler_debug $THEN
+  /** Type for severity collection for the internal debugging. */
+  TYPE log_level_severity_type IS TABLE OF PLS_INTEGER INDEX BY t_log_level.log_level%TYPE;
+  /** Collection for severities for the internal debugging. */
+  g_log_level_severities log_level_severity_type;
+  $END
+
   -- these elements are public when unit testing precompiler option is set to TRUE
   -- therefore they cannot be defined in the body
   $IF NOT logging_settings.c_precompiler_unit_test $THEN
@@ -1703,6 +1711,50 @@ CREATE OR REPLACE PACKAGE BODY logging IS
        x_level);
     COMMIT;
   END log_table;
+  
+  
+   -- these elements are defined only if internal debugging is set to TRUE
+  $IF logging_settings.c_precompiler_debug $THEN
+  /**
+  * Procedure initializes log level severities for internal debugging
+  */
+  PROCEDURE init_log_level_severities IS    
+  BEGIN
+     FOR l_row IN (select ll.log_level, ll.severity FROM t_log_level ll) LOOP
+       g_log_level_severities(l_row.log_level) := l_row.severity;
+     END LOOP;  
+  END init_log_level_severities;
+  $END
+  
+  -- these elements are defined only if internal debugging is set to TRUE
+  $IF logging_settings.c_precompiler_debug $THEN
+  /**
+  * Procedure logs given message as an internal log.
+  * @param x_level Log levelof the message.
+  * @param x_logger Logger name.
+  * @param x_message Message.
+  */
+  PROCEDURE internal_log(x_level   IN t_log_level.log_level%TYPE,
+                         x_logger  IN t_logger.logger%TYPE,
+                         x_message IN message_type) IS
+    PRAGMA AUTONOMOUS_TRANSACTION;
+  BEGIN 
+    IF g_log_level_severities(g_internal_log_level) > g_log_level_severities(x_level) THEN
+       RETURN;
+    END IF;
+    INSERT INTO t_log
+      (id, logger, message, log_date, call_stack, backtrace, log_level)
+    VALUES
+      (seq_log_id.NEXTVAL,
+       x_logger,
+       x_message,
+       systimestamp,
+       NULL,
+       NULL,
+       x_level);
+    COMMIT;
+  END internal_log;
+  $END
 
   /**
   * Procedure logs given message.
@@ -2039,6 +2091,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   END remove_app;
 
 BEGIN
+ -- these elements are defined only if internal debugging is set to TRUE
+  $IF logging_settings.c_precompiler_debug $THEN
+    init_log_level_severities();
+  $END
+
   -- $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name', 'YES');
   --$END
   g_root_logger_hash := hash_logger_name(c_root_logger_name);

@@ -97,6 +97,11 @@ CREATE OR REPLACE PACKAGE logging IS
   /** SMTP appender. */
   c_smtp_appender CONSTANT t_appender.appender%TYPE := 'SMTP';
 
+  -- these elements are defined only if internal debugging is set to TRUE
+  $IF logging_settings.c_precompiler_debug $THEN
+     g_internal_log_level t_log_level.log_level%TYPE := c_error_level; 
+  $END
+
   -- these elements are public only when unit testing precompiler option is set to TRUE
   $IF logging_settings.c_precompiler_unit_test $THEN
     -- types and variables
@@ -105,6 +110,13 @@ CREATE OR REPLACE PACKAGE logging IS
     c_session_flag CONSTANT visibility_type := 2;
 
     -- methods
+    -- internal debugger private methods
+    $IF logging_settings.c_precompiler_debug $THEN
+    PROCEDURE internal_log(x_level   IN t_log_level.log_level%TYPE,
+                           x_logger  IN t_logger.logger%TYPE,
+                           x_message IN message_type);
+    PROCEDURE init_log_level_severities;
+    $END
     FUNCTION bool_to_int(x_boolean IN BOOLEAN) RETURN NUMBER;
     FUNCTION dequeue_from_cyclic_buffer RETURN VARCHAR2;
     PROCEDURE enqueue_into_cyclic_buffer(x_app IN VARCHAR2, x_message IN message_type);
