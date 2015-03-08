@@ -9,6 +9,10 @@ CREATE OR REPLACE PACKAGE logging IS
   * (*) project page        https://github.com/radino/logger4plsql/
   * @author Radoslav Golian
   */
+  
+  /**Precompiler setting */
+  /**Precompiler setting */
+  /**Precompiler setting */
 
   /** Type for parameter names. */
   TYPE param_names_type IS TABLE OF user_objects.object_name%TYPE;

@@ -147,8 +147,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   BEGIN
     IF c_user <> c_schema_name THEN
       raise_application_error(-20003, 'For internal use only');
+    END IF;    
+    IF x_value IS NULL THEN
+      dbms_session.clear_context(x_namespace, x_attribute);
+    ELSE
+      dbms_session.set_context(x_namespace, x_attribute, x_value);
     END IF;
-    dbms_session.set_context(x_namespace, x_attribute, x_value);
   END set_context;
 
   /** Procedure sets context for all RAC instances.
@@ -171,7 +175,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
     IF l_instance_count = 0 THEN 
       RETURN;
-    END IF;
+    END IF;    
 
     l_what := 'logging.set_context(
                     ''' || x_namespace || ''',
@@ -2062,6 +2066,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                     x_app_descr IN t_app.app_desc%TYPE) IS
     PRAGMA AUTONOMOUS_TRANSACTION;
   BEGIN
+    
     INSERT INTO t_app(app, app_desc)
     VALUES (x_app, x_app_descr);
         
@@ -2105,6 +2110,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
             and gc.namespace = c_global_user_app_ctx)
             or (gc.attribute like x_app || '#')
     ) LOOP
+       $IF logging.ver_ge_11_2 $THEN
+         set_context_on_rac(l_row.namespace, l_row.attribute, NULL);
+       $END
+    
        dbms_session.clear_context(namespace => l_row.namespace, attribute => l_row.attribute);
     END LOOP;
   END remove_app;
