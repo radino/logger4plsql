@@ -55,6 +55,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   /** Hash for the root logger */
   g_root_logger_hash hash_type;
 
+  -- these elements are public when unit testing precompiler option is set to TRUE
+  -- therefore they cannot be defined in the body
+  $IF NOT logging_settings.c_precompiler_unit_test $THEN
   /** Type for visibility: session or global */
   SUBTYPE visibility_type IS PLS_INTEGER RANGE 1 .. 2;
 
@@ -63,6 +66,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
   /** Flag for visibility: session */
   c_session_flag CONSTANT visibility_type := 2;
+  $END
 
   /** Type for context list */
   TYPE context_list_type IS VARRAY(2) OF ctx_namespace_type;
@@ -92,6 +96,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
   /** Name of global context containing appenders' codes. */
   c_global_appenders_ctx CONSTANT ctx_namespace_type := 'CTX_LOGGER_APPENDERS_G';
+
+  /** Suffixes of appenders context names regarding to visibility. */
+  c_append_vis_suffix context_list_type := context_list_type('_G','_L');
 
   /** Root logger name. */
   c_root_logger_name CONSTANT ctx_namespace_type := '/';
@@ -677,66 +684,43 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   END get_appender_code;
 
   /**
-  * Function returns global layout for given application and appender.
+  * Function returns global or session layout for given application, appender and visibility.
   * If layout is not set, default layout is returned.
   * @param x_app Application name.
   * @param x_appender Appender name.
-  * @return Global layout for given application and appender.
+  * @param x_visibility Global or session visibility  
+  * @return 
+  *   {*} Global layout for given application and appender, if visibility is c_global_flag
+  *   {*} Session layout for given application and appender, if visibility is c_session_flag
   */
-  FUNCTION get_global_layout(x_app      IN t_app_appender.app%TYPE,
-                             x_appender IN t_app_appender.appender%TYPE)
+  FUNCTION get_layout(x_app        IN t_app_appender.app%TYPE,
+                      x_appender   IN t_app_appender.appender%TYPE,
+                      x_visibility IN visibility_type DEFAULT c_global_flag)
     RETURN t_app_appender.parameter_value%TYPE IS
   BEGIN
-    RETURN nvl(sys_context(sys_context(c_global_appenders_ctx, x_appender) || '_G', x_app || '#LAYOUT'),
+    RETURN nvl(sys_context(sys_context(c_global_appenders_ctx, x_appender) || c_append_vis_suffix(x_visibility), x_app || '#LAYOUT'),
                sys_context(c_parameters_ctx(c_global_flag), c_default_layout_param));
-  END get_global_layout;
+  END get_layout;
 
   /**
-  * Function returns session layout for given application and appender.
-  * If layout is not set, default layout is returned.
-  * @param x_app Application name.
-  * @param x_appender Appender name.
-  * @return session layout for given application and appender.
-  */
-  FUNCTION get_session_layout(x_app      IN t_app_appender.app%TYPE,
-                              x_appender IN t_app_appender.appender%TYPE)
-    RETURN t_app_appender.parameter_value%TYPE IS
-  BEGIN
-    RETURN nvl(sys_context(sys_context(c_global_appenders_ctx, x_appender) || '_L', x_app || '#LAYOUT'),
-               sys_context(c_parameters_ctx(c_global_flag), c_default_layout_param));
-  END get_session_layout;
-
-  /**
-  * Function returns global parameter value for given application, appender and parameter.
+  * Function returns global or session parameter value for given application, appender, parameter and visibility.
   * @param x_app Application name.
   * @param x_appender Appender name.
   * @param x_parameter_name Parameter name.
-  * @return Global parameter value for given application, appender and parameter.
+  * @param x_visibility Global or session visibility  
+  * @return Global or session parameter value for given application, appender and parameter.
+  *   {*} Global parameter value for given application, appender and parameter, if visibility is c_global_flag
+  *   {*} Session parameter value for given application, appender and parameter, if visibility is c_session_flag
   */
-  FUNCTION get_global_appender_param(x_app            IN t_app_appender.app%TYPE,
-                                     x_appender       IN t_app_appender.appender%TYPE,
-                                     x_parameter_name IN t_app_appender.parameter_name%TYPE)
+  FUNCTION get_appender_param(x_app            IN t_app_appender.app%TYPE,
+                              x_appender       IN t_app_appender.appender%TYPE,
+                              x_parameter_name IN t_app_appender.parameter_name%TYPE,
+                              x_visibility     IN visibility_type DEFAULT c_global_flag)
     RETURN t_app_appender.parameter_value%TYPE IS
   BEGIN
-    RETURN sys_context(sys_context(c_global_appenders_ctx, x_appender) || '_G',
+    RETURN sys_context(sys_context(c_global_appenders_ctx, x_appender) || c_append_vis_suffix(x_visibility),
                        x_app || '#' || x_parameter_name);
-  END get_global_appender_param;
-
-  /**
-  * Function returns global parameter value for given application, appender and parameter.
-  * @param x_app Application name.
-  * @param x_appender Appender name.
-  * @param x_parameter_name Parameter name.
-  * @return Global parameter value for given application, appender and parameter.
-  */
-  FUNCTION get_session_appender_param(x_app            IN t_app_appender.app%TYPE,
-                                      x_appender       IN t_app_appender.appender%TYPE,
-                                      x_parameter_name IN t_app_appender.parameter_name%TYPE)
-    RETURN t_app_appender.parameter_value%TYPE IS
-  BEGIN
-    RETURN sys_context(sys_context(c_global_appenders_ctx, x_appender) || '_L',
-                       x_app || '#' || x_parameter_name);
-  END get_session_appender_param;
+  END get_appender_param;
 
   /**
   * Function returns current (global or session based on get_session_ctx_usage) parameter
@@ -753,10 +737,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   BEGIN
 
     IF get_session_ctx_usage() THEN
-      RETURN get_session_appender_param(x_app, x_appender, x_parameter_name);
+      RETURN get_appender_param(x_app, x_appender, x_parameter_name, c_session_flag);
     END IF;
 
-    RETURN get_global_appender_param(x_app, x_appender, x_parameter_name);
+    RETURN get_appender_param(x_app, x_appender, x_parameter_name, c_global_flag);
   END get_current_appender_param;
 
   /**
@@ -771,10 +755,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     RETURN t_app_appender.parameter_value%TYPE IS
   BEGIN
     IF get_session_ctx_usage THEN
-      RETURN get_session_layout(x_app, x_appender);
+      RETURN get_layout(x_app, x_appender, c_session_flag);
     END IF;
 
-    RETURN get_global_layout(x_app, x_appender);
+    RETURN get_layout(x_app, x_appender, c_global_flag);
   END get_current_layout;
 
   /**
@@ -825,15 +809,15 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   END get_level;
 
   /**
-  * Function returns binary coded list of appenders for given logger.
+  * Function returns binary encoded list of appenders for given logger.
   * @param x_logger_name Logger name.
   * @param x_ctx_name Name of a context containing appenders.
   * @param x_ctx_name Name of a context containing additivity flag.
-  * @return Binary coded list of appenders for given logger.
+  * @return Binary encoded list of appenders for given logger.
   */
   FUNCTION get_appenders(x_logger_name  IN t_logger.logger%TYPE,
-                         x_app_ctx_name IN ctx_namespace_type,
-                         x_add_ctx_name IN ctx_namespace_type) RETURN t_logger.appenders%TYPE IS
+                             x_app_ctx_name IN ctx_namespace_type,
+                             x_add_ctx_name IN ctx_namespace_type) RETURN t_logger.appenders%TYPE IS
     i             PLS_INTEGER;
     l_logger_name t_logger.logger%TYPE;
     l_hlogger     hash_type;
@@ -860,63 +844,23 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   END get_appenders;
 
   /**
-  * Function returns binary coded list of global appenders for given logger.
+  * Function returns binary encoded list of currently used appenders (based on get_session_ctx_usage) for given logger.
   * @param x_logger_name Logger name.
-  * @return Binary coded list of global appenders for given logger.
-  */
-  FUNCTION get_global_appenders(x_logger_name IN t_logger.logger%TYPE) RETURN t_logger.appenders%TYPE IS
-  BEGIN
-    RETURN get_appenders(x_logger_name,
-                         c_logger_appenders_ctx(c_global_flag),
-                         c_additivity_ctx(c_global_flag));
-  END get_global_appenders;
-
-  /**
-  * Function returns binary coded list of session appenders for given logger.
-  * @param x_logger_name Logger name.
-  * @return Binary coded list of session appenders for given logger.
-  */
-  FUNCTION get_session_appenders(x_logger_name IN t_logger.logger%TYPE) RETURN t_logger.appenders%TYPE IS
-  BEGIN
-    RETURN get_appenders(x_logger_name,
-                         c_logger_appenders_ctx(c_session_flag),
-                         c_additivity_ctx(c_session_flag));
-  END get_session_appenders;
-
-  /**
-  * Function returns binary coded list of currently used appenders (based on get_session_ctx_usage) for given logger.
-  * @param x_logger_name Logger name.
-  * @return Binary coded list of currently used appenders for given logger.
+  * @return Binary encoded list of currently used appenders for given logger.
   */
   FUNCTION get_current_used_appenders(x_logger_name IN t_logger.logger%TYPE) RETURN t_logger.appenders%TYPE IS
   BEGIN
 
     IF get_session_ctx_usage() THEN
-      RETURN get_session_appenders(x_logger_name);
+      RETURN get_appenders(x_logger_name, 
+                           c_logger_appenders_ctx(c_session_flag),
+                           c_additivity_ctx(c_session_flag));
     END IF;
 
-    RETURN get_global_appenders(x_logger_name);
+    RETURN get_appenders(x_logger_name, 
+                         c_logger_appenders_ctx(c_global_flag),
+                         c_additivity_ctx(c_global_flag));
   END get_current_used_appenders;
-
-  /**
-  * Function returns global log level for given logger.
-  * @param x_logger_name Logger name.
-  * @return Global log level for given logger.
-  */
-  FUNCTION get_global_level(x_logger_name IN t_logger.logger%TYPE) RETURN t_logger.log_level%TYPE IS
-  BEGIN
-    RETURN get_level(x_logger_name, c_logger_levels_ctx(c_global_flag));
-  END get_global_level;
-
-  /**
-  * Function returns session log level for given logger.
-  * @param x_logger_name Logger name.
-  * @return session log level for given logger.
-  */
-  FUNCTION get_session_level(x_logger_name IN t_logger.logger%TYPE) RETURN t_logger.log_level%TYPE IS
-  BEGIN
-    RETURN get_level(x_logger_name, c_logger_levels_ctx(c_session_flag));
-  END get_session_level;
 
   /**
   * Function returns currently used (based on get_session_ctx_usage) log level for given logger.
@@ -926,10 +870,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   FUNCTION get_current_used_level(x_logger_name IN t_logger.logger%TYPE) RETURN t_logger.log_level%TYPE IS
   BEGIN
     IF get_session_ctx_usage() THEN
-      RETURN get_session_level(x_logger_name);
+      RETURN get_level(x_logger_name, c_logger_levels_ctx(c_session_flag));
     END IF;
 
-    RETURN get_global_level(x_logger_name);
+    RETURN get_level(x_logger_name, c_logger_levels_ctx(c_global_flag));
   END get_current_used_level;
 
   /**
@@ -1210,43 +1154,19 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   END set_session_parameter;
 
   /**
-  * Function obtains session parameter value for given app and parameter name.
+  * Function obtains current parameter value for given app and parameter name.
   * @param x_app Application.
   * @param x_param_name Parameter name.
-  * @return Sessio parameter value for given application and parameter name.
-  */
-  FUNCTION get_session_parameter(x_app        IN t_param.app%TYPE,
-                                 x_param_name IN t_param.param_name%TYPE) RETURN t_param.param_value%TYPE IS
-  BEGIN
-    RETURN sys_context(c_parameters_ctx(c_session_flag), x_app || '#' || x_param_name);
-  END get_session_parameter;
-
-  /**
-  * Function obtains global parameter value for given app and parameter name.
-  * @param x_app Application.
-  * @param x_param_name Parameter name.
-  * @return Global parameter value for given application and parameter name.
-  */
-  FUNCTION get_global_parameter(x_app        IN t_param.app%TYPE,
-                                x_param_name IN t_param.param_name%TYPE) RETURN t_param.param_value%TYPE IS
-  BEGIN
-    RETURN sys_context(c_parameters_ctx(c_global_flag), x_app || '#' || x_param_name);
-  END get_global_parameter;
-
-  /**
-  * Function obtains global parameter value for given app and parameter name.
-  * @param x_app Application.
-  * @param x_param_name Parameter name.
-  * @return Global parameter value for given application and parameter name.
+  * @return Current parameter value for given application and parameter name.
   */
   FUNCTION get_current_parameter(x_app        IN t_param.app%TYPE,
                                  x_param_name IN t_param.param_name%TYPE) RETURN t_param.param_value%TYPE IS
   BEGIN
     IF get_session_ctx_usage() THEN
-      RETURN get_session_parameter(x_app, x_param_name);
+      RETURN sys_context(c_parameters_ctx(c_session_flag), x_app || '#' || x_param_name);
     END IF;
 
-    RETURN get_global_parameter(x_app, x_param_name);
+    RETURN sys_context(c_parameters_ctx(c_global_flag), x_app || '#' || x_param_name);
   END get_current_parameter;
 
   /**
@@ -1388,7 +1308,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       g_mail_buffer.tail      := 1;
       g_mail_buffer.buffer    := mail_table_type();
       g_mail_buffer.buff_size := 1000;
-      g_mail_buffer.buff_size := nvl(get_global_appender_param(x_app, 'SMTP', 'MAIL_BUFFER_LINES'), 1000);
+      g_mail_buffer.buff_size := nvl(get_appender_param(x_app, 'SMTP', 'MAIL_BUFFER_LINES', c_global_flag), 1000);
       g_mail_buffer.buffer.EXTEND(g_mail_buffer.buff_size);
   END init_email_cyclic_buffer;
 

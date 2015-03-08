@@ -10,10 +10,6 @@ CREATE OR REPLACE PACKAGE logging IS
   * @author Radoslav Golian
   */
   
-  /**Precompiler setting */
-  /**Precompiler setting */
-  /**Precompiler setting */
-
   /** Type for parameter names. */
   TYPE param_names_type IS TABLE OF user_objects.object_name%TYPE;
 
@@ -100,6 +96,93 @@ CREATE OR REPLACE PACKAGE logging IS
 
   /** SMTP appender. */
   c_smtp_appender CONSTANT t_appender.appender%TYPE := 'SMTP';
+
+  -- these elements are public only when unit testing precompiler option is set to TRUE
+  $IF logging_settings.c_precompiler_unit_test $THEN
+    -- types and variables
+    SUBTYPE visibility_type IS PLS_INTEGER RANGE 1 .. 2;
+    c_global_flag CONSTANT visibility_type := 1;
+    c_session_flag CONSTANT visibility_type := 2;
+
+    -- methods
+    FUNCTION bool_to_int(x_boolean IN BOOLEAN) RETURN NUMBER;
+    FUNCTION dequeue_from_cyclic_buffer RETURN VARCHAR2;
+    PROCEDURE enqueue_into_cyclic_buffer(x_app IN VARCHAR2, x_message IN message_type);
+    FUNCTION format_call_stack RETURN VARCHAR2;
+    FUNCTION format_message(x_message     IN message_type,
+                          x_layout      IN t_app_appender.parameter_value%TYPE,
+                          x_logger_name IN t_logger.logger%TYPE,
+                          x_level       IN t_logger.log_level%TYPE) RETURN VARCHAR2;
+    FUNCTION get_app(x_schema IN t_schema_app.schema%TYPE) RETURN t_schema_app.app%TYPE;
+    FUNCTION get_appender_code(x_appender IN t_appender.appender%TYPE) RETURN t_appender.code%TYPE;
+    FUNCTION get_appender_param(x_app            IN t_app_appender.app%TYPE,
+                                x_appender       IN t_app_appender.appender%TYPE,
+                                x_parameter_name IN t_app_appender.parameter_name%TYPE,
+                                x_visibility     IN visibility_type DEFAULT c_global_flag) RETURN t_app_appender.parameter_value%TYPE;  
+    FUNCTION get_appenders(x_logger_name  IN t_logger.logger%TYPE,
+                               x_app_ctx_name IN ctx_namespace_type,
+                               x_add_ctx_name IN ctx_namespace_type) RETURN t_logger.appenders%TYPE;
+    FUNCTION get_current_appender_param(x_app            IN t_app_appender.app%TYPE,
+                                        x_appender       IN t_app_appender.appender%TYPE,
+                                        x_parameter_name IN t_app_appender.parameter_name%TYPE) RETURN t_app_appender.parameter_value%TYPE;
+    FUNCTION get_current_layout(x_app      IN t_app_appender.app%TYPE,
+                                x_appender IN t_app_appender.appender%TYPE) RETURN t_app_appender.parameter_value%TYPE;
+    FUNCTION get_current_parameter(x_app        IN t_param.app%TYPE,
+                                 x_param_name IN t_param.param_name%TYPE) RETURN t_param.param_value%TYPE;
+    FUNCTION get_current_used_appenders(x_logger_name IN t_logger.logger%TYPE) RETURN t_logger.appenders%TYPE;
+    FUNCTION get_current_used_level(x_logger_name IN t_logger.logger%TYPE) RETURN t_logger.log_level%TYPE;
+    FUNCTION get_layout(x_app        IN t_app_appender.app%TYPE,
+                      x_appender   IN t_app_appender.appender%TYPE,
+                      x_visibility IN visibility_type DEFAULT c_global_flag)
+    RETURN t_app_appender.parameter_value%TYPE;
+    FUNCTION get_level(x_logger_name IN t_logger.logger%TYPE,
+                     x_ctx_name    IN VARCHAR2) RETURN t_logger.log_level%TYPE;
+    FUNCTION get_level_severity(x_level IN t_log_level.log_level%TYPE) RETURN t_log_level.severity%TYPE;    
+    FUNCTION get_nth_logger_name(x_logger_name IN t_logger.logger%TYPE,
+                                 x_nth         IN PLS_INTEGER) RETURN t_logger.logger%TYPE;
+    FUNCTION get_session_ctx_usage RETURN BOOLEAN;
+    PROCEDURE init_appenders(x_visibility IN visibility_type DEFAULT c_global_flag);
+    PROCEDURE init_email_cyclic_buffer(x_app IN VARCHAR2);
+    PROCEDURE init_levels;
+    PROCEDURE init_loggers(x_visibility IN visibility_type DEFAULT c_global_flag);
+    PROCEDURE init_params(x_visibility IN visibility_type DEFAULT c_global_flag);
+    PROCEDURE init_user_app;
+    FUNCTION int_to_bool(x_number IN NUMBER) RETURN BOOLEAN;
+    FUNCTION is_cyclic_buffer_empty RETURN BOOLEAN;
+    FUNCTION is_initialized(x_ctx IN ctx_namespace_type) RETURN BOOLEAN;
+    PROCEDURE log(x_level          IN t_log_level.log_level%TYPE,
+                x_logger         IN OUT NOCOPY logger_type,
+                x_message        IN message_type,
+                x_log_backtrace  IN BOOLEAN,
+                x_log_call_stack IN BOOLEAN);
+    PROCEDURE log_smtp(x_app           IN t_app_appender.app%TYPE,
+                     x_logger_name   IN t_logger.logger%TYPE,
+                     x_level         IN t_log_level.log_level%TYPE,
+                     x_message       IN message_type,
+                     x_call_stack    IN BOOLEAN,
+                     x_log_backtrace IN BOOLEAN);
+    PROCEDURE log_stdout(x_app           IN t_app_appender.app%TYPE,
+                       x_logger_name   IN t_logger.logger%TYPE,
+                       x_level         IN t_log_level.log_level%TYPE,
+                       x_message       IN message_type,
+                       x_call_stack    IN BOOLEAN,
+                       x_log_backtrace IN BOOLEAN);
+    PROCEDURE log_table(x_app           IN t_app_appender.app%TYPE,
+                      x_logger_name   IN t_logger.logger%TYPE,
+                      x_level         IN t_log_level.log_level%TYPE,
+                      x_message       IN message_type,
+                      x_call_stack    IN BOOLEAN,
+                      x_log_backtrace IN BOOLEAN);
+    PROCEDURE parse_stack(o_logger     OUT VARCHAR2,
+                          o_app        OUT VARCHAR2,
+                          x_method     IN VARCHAR2 DEFAULT NULL,
+                          x_call_stack IN VARCHAR2 DEFAULT dbms_utility.format_call_stack());
+    PROCEDURE set_context_on_rac(x_namespace      IN ctx_namespace_type,
+                                 x_attribute      IN ctx_attribute_type,
+                                 x_value          IN ctx_value_type);
+    PROCEDURE send_buffer(x_app IN t_app_appender.app%TYPE);
+    PROCEDURE unimplemented;
+  $END
 
   /**
   * Function returns bitwise OR of given numbers.
