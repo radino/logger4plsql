@@ -258,6 +258,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     dbms_utility.active_instances(instance_table => l_instance_table, instance_count => l_instance_count);
 
     IF l_instance_count = 0  THEN 
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_context',  'YES'); $END
       set_context(x_namespace => x_namespace, x_attribute => x_attribute, x_value => x_value); 
       RETURN;
     END IF;    
@@ -289,6 +290,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     END;
     $ELSE
       -- if the database version is >=11.2, applicaton context is replicated across the instances
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_context',  'YES'); $END
       set_context(x_namespace => x_namespace, x_attribute => x_attribute, x_value => x_value);
     $END
   END set_context_rac_aware;
@@ -442,7 +444,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       (SCHEMA, app)
     VALUES
       (upper(x_schema), upper(x_app));
-
+    
     set_context_rac_aware(c_global_user_app_ctx, upper(x_schema), upper(x_app));
 
     COMMIT;
@@ -505,6 +507,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   PROCEDURE init_levels IS
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('is_initialized',  'YES'); $END
     IF is_initialized(c_global_levels_ctx) THEN
       RETURN;
     END IF;
@@ -513,7 +516,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                     FROM t_log_level ll) LOOP
       dbms_session.set_context(c_global_levels_ctx, l_row.log_level, l_row.severity);
     END LOOP;
-
+    
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_initialization',  'YES'); $END
     set_initialization(c_global_levels_ctx, TRUE);
   END init_levels;
 
@@ -528,6 +532,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_current_appender_ctx ctx_namespace_type;
     l_ctx_suffix           VARCHAR2(2);
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('is_initialized',  'YES'); $END
     IF x_visibility = c_global_flag AND is_initialized(c_global_appenders_ctx) THEN
       RETURN;
     END IF;
@@ -553,11 +558,13 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                                  l_row2.app || '#' || l_row2.parameter_name,
                                  l_row2.parameter_value);
       END LOOP;
-
+      
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_initialization',  'YES'); $END
       set_initialization(l_current_appender_ctx, TRUE);
     END LOOP;
 
     IF x_visibility = c_global_flag THEN
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_initialization',  'YES'); $END
       set_initialization(c_global_appenders_ctx, TRUE);
     END IF;
   END init_appenders;
@@ -571,6 +578,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   PROCEDURE init_params(x_visibility IN visibility_type DEFAULT c_global_flag) IS
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('is_initialized',  'YES'); $END
     IF is_initialized(c_parameters_ctx(x_visibility)) THEN
       RETURN;
     END IF;
@@ -581,7 +589,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                                l_row.app || '#' || l_row.param_name,
                                l_row.param_value);
     END LOOP;
-
+    
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_initialization',  'YES'); $END
     set_initialization(c_parameters_ctx(x_visibility), TRUE);
   END init_params;
 
@@ -600,6 +609,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   PROCEDURE init_loggers(x_visibility IN visibility_type DEFAULT c_global_flag) IS
     l_hlogger hash_type;
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('is_initialized',  'YES'); $END
     IF is_initialized(c_logger_names_ctx(x_visibility)) THEN
       RETURN;
     END IF;
@@ -612,7 +622,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       dbms_session.set_context(c_logger_appenders_ctx(x_visibility), l_hlogger, l_row.appenders);
       dbms_session.set_context(c_additivity_ctx(x_visibility), l_hlogger, l_row.additivity);
     END LOOP;
-
+     
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_initialization',  'YES'); $END
     set_initialization(c_logger_names_ctx(x_visibility), TRUE);
   END init_loggers;
 
@@ -622,6 +633,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   PROCEDURE init_user_app IS
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('is_initialized',  'YES'); $END
     IF is_initialized(c_global_user_app_ctx) THEN
       RETURN;
     END IF;
@@ -630,7 +642,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                     FROM t_schema_app ua) LOOP
       dbms_session.set_context(c_global_user_app_ctx, l_row.SCHEMA, l_row.app);
     END LOOP;
-
+    
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_initialization',  'YES'); $END
     set_initialization(c_global_user_app_ctx, TRUE);
   END init_user_app;
 
@@ -708,7 +721,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
         (app, appender, parameter_name, parameter_value)
       VALUES
         (x_app, x_appender, x_parameter_name, x_parameter_value);
-
+    
     set_context_rac_aware(sys_context(c_global_appenders_ctx, x_appender) || '_G',
                           x_app || '#' || x_parameter_name,
                           x_parameter_value);
@@ -804,11 +817,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                                       x_parameter_name IN t_app_appender.parameter_name%TYPE)
     RETURN t_app_appender.parameter_value%TYPE IS
   BEGIN
-
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_session_ctx_usage',  'YES'); $END
     IF get_session_ctx_usage() THEN
       RETURN get_appender_param(x_app, x_appender, x_parameter_name, c_session_flag);
     END IF;
-
+    
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_appender_param',  'YES'); $END
     RETURN get_appender_param(x_app, x_appender, x_parameter_name, c_global_flag);
   END get_current_appender_param;
 
@@ -823,10 +837,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                               x_appender IN t_app_appender.appender%TYPE)
     RETURN t_app_appender.parameter_value%TYPE IS
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_session_ctx_usage',  'YES'); $END
     IF get_session_ctx_usage THEN
       RETURN get_layout(x_app, x_appender, c_session_flag);
     END IF;
-
+    
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_layout',  'YES'); $END
     RETURN get_layout(x_app, x_appender, c_global_flag);
   END get_current_layout;
 
@@ -859,9 +875,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   BEGIN
     i := 1;
     LOOP
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_nth_logger_name',  'YES'); $END
       l_logger_name := get_nth_logger_name(x_logger_name, i);
       EXIT WHEN l_logger_name IS NULL;
-
+      
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
       l_hlogger := hash_logger_name(l_logger_name);
 
       l_level := sys_context(x_ctx_name, l_hlogger);
@@ -895,10 +913,13 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     i           := 1;
     l_appenders := 0;
     LOOP
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_nth_logger_name',  'YES'); $END
       l_logger_name := get_nth_logger_name(x_logger_name, i);
       EXIT WHEN l_logger_name IS NULL;
 
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
       l_hlogger   := hash_logger_name(l_logger_name);
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bit_or',  'YES'); $END
       l_appenders := bit_or(l_appenders, nvl(sys_context(x_app_ctx_name, l_hlogger), 0));
 
       IF sys_context(x_add_ctx_name, l_hlogger) = 0 THEN
@@ -909,6 +930,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     END LOOP;
 
     l_hlogger := g_root_logger_hash;
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bit_or',  'YES'); $END
     RETURN bit_or(l_appenders, nvl(sys_context(x_app_ctx_name, l_hlogger), 0));
   END get_appenders;
 
@@ -919,7 +941,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   FUNCTION get_current_used_appenders(x_logger_name IN t_logger.logger%TYPE) RETURN t_logger.appenders%TYPE IS
   BEGIN
-
+    
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_session_ctx_usage',  'YES'); $END
     IF get_session_ctx_usage() THEN
       RETURN get_appenders(x_logger_name, 
                            c_logger_appenders_ctx(c_session_flag),
@@ -938,6 +961,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   FUNCTION get_current_used_level(x_logger_name IN t_logger.logger%TYPE) RETURN t_logger.log_level%TYPE IS
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_session_ctx_usage',  'YES'); $END
     IF get_session_ctx_usage() THEN
       RETURN get_level(x_logger_name, c_logger_levels_ctx(c_session_flag));
     END IF;
@@ -961,6 +985,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_hlogger    hash_type;
     l_additivity t_logger.additivity%TYPE;
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_app',  'YES'); $END
     l_app := get_app(c_user);
 
     IF l_app IS NULL AND c_user NOT IN ('SYS', c_schema_name) THEN
@@ -994,8 +1019,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
         (x_logger_name, l_appenders, l_additivity);
     END IF;
 
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger := hash_logger_name(x_logger_name);
-
+    
     set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name);
     set_context_rac_aware(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders);
     set_context_rac_aware(c_additivity_ctx(c_global_flag), l_hlogger, l_additivity);
@@ -1017,6 +1043,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_hlogger    hash_type;
     l_additivity t_logger.additivity%TYPE;
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_app',  'YES'); $END
     l_app := get_app(c_user);
 
     SELECT NULL
@@ -1042,6 +1069,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
         (x_logger_name, l_appenders, l_additivity);
     END IF;
 
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger := hash_logger_name(x_logger_name);
 
     set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name);
@@ -1064,6 +1092,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_appenders t_logger.appenders%TYPE;
     l_hlogger   hash_type;
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_app',  'YES'); $END
     l_app := get_app(c_user);
 
     IF l_app IS NULL AND c_user NOT IN ('SYS', c_schema_name) THEN
@@ -1089,6 +1118,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
     -- an appender with given code was set for given logger
     IF SQL%FOUND THEN
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
       l_hlogger := hash_logger_name(x_logger_name);
 
       set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name);
@@ -1120,10 +1150,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       WHEN no_data_found THEN
         raise_application_error(-20001, 'No such appender');
     END;
-
+    
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger := hash_logger_name(x_logger_name);
 
     l_appenders := nvl(sys_context(c_logger_appenders_ctx(c_session_flag), l_hlogger), 0);
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bit_or',  'YES'); $END
     l_appenders := bit_or(l_appenders, l_code);
     dbms_session.set_context(c_logger_names_ctx(c_session_flag), l_hlogger, x_logger_name);
     dbms_session.set_context(c_logger_appenders_ctx(c_session_flag), l_hlogger, l_appenders);
@@ -1143,6 +1175,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_appenders t_logger.appenders%TYPE;
     l_hlogger   hash_type;
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger   := hash_logger_name(x_logger_name);
     l_appenders := nvl(sys_context(c_logger_appenders_ctx(c_session_flag), l_hlogger), 0);
     dbms_session.set_context(c_logger_names_ctx(c_session_flag), l_hlogger, x_logger_name);
@@ -1233,11 +1266,14 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       WHEN no_data_found THEN
         raise_application_error(-20001, 'No such appender');
     END;
-
+    
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger   := hash_logger_name(x_logger_name);
     l_appenders := nvl(sys_context(c_logger_appenders_ctx(c_session_flag), l_hlogger), 0);
-
+    
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bitand',  'YES'); $END
     IF bitand(l_appenders, l_code) > 0 THEN
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bit_xor',  'YES'); $END
       l_appenders := bit_xor(l_appenders, l_code);
       dbms_session.set_context(c_logger_appenders_ctx(c_session_flag), l_hlogger, l_appenders);
     END IF;
@@ -1255,6 +1291,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_dummy     VARCHAR2(1);
     l_hlogger   hash_type;
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_app',  'YES'); $END
     l_app := get_app(c_user);
 
     SELECT NULL
@@ -1276,6 +1313,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       VALUES
         (x_logger_name, x_log_level);
 
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger := hash_logger_name(x_logger_name);
 
     set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name);
@@ -1293,6 +1331,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                               x_log_level   IN t_logger.log_level%TYPE) IS
     l_hlogger hash_type;
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger := hash_logger_name(x_logger_name);
     dbms_session.set_context(c_logger_names_ctx(c_session_flag), l_hlogger, x_logger_name);
     dbms_session.set_context(c_logger_levels_ctx(c_session_flag), l_hlogger, x_log_level);
@@ -1348,6 +1387,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       g_mail_buffer.tail      := 1;
       g_mail_buffer.buffer    := mail_table_type();
       g_mail_buffer.buff_size := 1000;
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_appender_param',  'YES'); $END
       g_mail_buffer.buff_size := nvl(get_appender_param(x_app, 'SMTP', 'MAIL_BUFFER_LINES', c_global_flag), 1000);
       g_mail_buffer.buffer.EXTEND(g_mail_buffer.buff_size);
   END init_email_cyclic_buffer;
@@ -1362,6 +1402,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
     -- if the size is NULL, buffer was not initialized
     IF g_mail_buffer.buff_size IS NULL THEN
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('init_email_cyclic_buffer',  'YES'); $END
       init_email_cyclic_buffer(x_app);
     END IF;
 
@@ -1455,7 +1496,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       IF l_obj_schema IS NULL THEN
         l_obj_schema := c_user;
       END IF;
-
+     
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_app',  'YES'); $END
       o_app  := get_app(l_obj_schema);
 
       o_logger := o_app || '.' || l_stack_object;
@@ -1474,10 +1516,13 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                       x_always_from_ctx IN ctx_boolean DEFAULT c_false) RETURN logger_type IS
     l_logger       logger_type;
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('parse_stack',  'YES'); $END
     parse_stack(l_logger.logger, l_logger.app, x_method);
     l_logger.always_from_ctx := x_always_from_ctx;
-
+    
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity',  'YES'); $END
     l_logger.log_level_severity := get_level_severity(get_current_used_level(l_logger.logger));
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_appenders',  'YES'); $END
     l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);
 
     RETURN l_logger;
@@ -1492,11 +1537,15 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   FUNCTION get_root_logger(x_always_from_ctx IN ctx_boolean DEFAULT c_false) RETURN logger_type IS
     l_logger logger_type;
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('parse_stack',  'YES'); $END
     parse_stack(l_logger.logger, l_logger.app);
     l_logger.logger          := c_root_logger_name;
     l_logger.always_from_ctx := x_always_from_ctx;
-
+    
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_level',  'YES'); $END
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity',  'YES'); $END
     l_logger.log_level_severity := get_level_severity(get_current_used_level(l_logger.logger));
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_appenders',  'YES'); $END
     l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);
     RETURN l_logger;
   END get_root_logger;
@@ -1510,10 +1559,14 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   FUNCTION get_app_logger(x_always_from_ctx IN ctx_boolean DEFAULT c_false) RETURN logger_type IS
     l_logger logger_type;
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('parse_stack',  'YES'); $END
     parse_stack(l_logger.logger, l_logger.app);
     l_logger.logger          := l_logger.app;
     l_logger.always_from_ctx := x_always_from_ctx;
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_level',  'YES'); $END
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity',  'YES'); $END
     l_logger.log_level_severity := get_level_severity(get_current_used_level(l_logger.logger));
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_appenders',  'YES'); $END
     l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);
     RETURN l_logger;
   END get_app_logger;
@@ -1527,10 +1580,14 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   FUNCTION get_schema_logger(x_always_from_ctx IN ctx_boolean DEFAULT c_false) RETURN logger_type IS
     l_logger logger_type;
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('parse_stack',  'YES'); $END
     parse_stack(l_logger.logger, l_logger.app);
     l_logger.logger          := l_logger.app || '.' || c_user;
     l_logger.always_from_ctx := x_always_from_ctx;
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_level',  'YES'); $END
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity',  'YES'); $END
     l_logger.log_level_severity := get_level_severity(get_current_used_level(l_logger.logger));
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_appenders',  'YES'); $END
     l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);
     RETURN l_logger;
   END get_schema_logger;
@@ -1551,9 +1608,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_comma_pos PLS_INTEGER;
     l_csv_list  VARCHAR2(32767);
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
     l_host := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_HOST');
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
     l_from := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_FROM');
 
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
     l_conn := utl_smtp.open_connection(host       => l_host,
                                        port       => get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_PORT'),
                                        tx_timeout => get_current_appender_param(x_app,
@@ -1571,9 +1631,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     IF l_reply.code <> 200 THEN
       NULL;
     END IF;
-
+    
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
     l_to  := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_TO');
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END    
     l_cc  := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_CC');
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
     l_bcc := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_BCC');
 
     IF l_to IS NOT NULL THEN
@@ -1608,6 +1671,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                         'Subject: ' || get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_SUBJECT') ||
                         utl_tcp.crlf);
 
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('is_cyclic_buffer_empty',  'YES'); $END
     WHILE NOT is_cyclic_buffer_empty() LOOP
       utl_smtp.write_data(l_conn,
                           --                          convert(
@@ -1648,20 +1712,26 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_layout        t_app_appender.parameter_value%TYPE;
     l_trigger_level t_log_level.log_level%TYPE;
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_layout',  'YES'); $END
     l_layout := get_current_layout(x_app, c_smtp_appender);
 
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('enqueue_into_cyclic_buffer',  'YES'); $END
     enqueue_into_cyclic_buffer(x_app, format_message(x_message, l_layout, x_logger_name, x_level) || c_nl);
 
     IF x_log_backtrace THEN
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('enqueue_into_cyclic_buffer',  'YES'); $END
       enqueue_into_cyclic_buffer(x_app, dbms_utility.format_error_stack() || dbms_utility.format_error_backtrace() || c_nl);
     END IF;
 
     IF x_call_stack THEN
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('enqueue_into_cyclic_buffer',  'YES'); $END
       enqueue_into_cyclic_buffer(x_app, format_call_stack() || c_nl);
     END IF;
 
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
     l_trigger_level := get_current_appender_param(x_app, 'SMTP', 'TRIGGER_LEVEL');
 
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity',  'YES'); $END
     IF get_level_severity(x_level) >= get_level_severity(l_trigger_level) THEN
       send_buffer(x_app);
     END IF;
@@ -1684,6 +1754,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                        x_log_backtrace IN BOOLEAN) IS
     l_layout t_app_appender.parameter_value%TYPE;
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_layout',  'YES'); $END
     l_layout := get_current_layout(x_app, c_dbms_output_appender);
 
     dbms_output.put_line(format_message(x_message, l_layout, x_logger_name, x_level));
@@ -1719,6 +1790,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_layout           t_app_appender.parameter_value%TYPE;
     l_formated_message t_log.message%TYPE;
   BEGIN
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_layout',  'YES'); $END
     l_layout := get_current_layout(x_app, c_table_appender);
 
     IF x_log_backtrace THEN
@@ -1803,29 +1875,38 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                 x_log_call_stack IN BOOLEAN) IS
   BEGIN
     IF x_logger.always_from_ctx = c_true THEN
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity',  'YES'); $END
       x_logger.log_level_severity := get_level_severity(get_current_used_level(x_logger.logger));
     END IF;
-
+    
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity',  'YES'); $END
     IF x_logger.log_level_severity > get_level_severity(x_level) THEN
       RETURN;
     END IF;
 
     IF x_logger.always_from_ctx = c_true THEN
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_appenders',  'YES'); $END
       x_logger.enabled_appenders := get_current_used_appenders(x_logger.logger);
     END IF;
 
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bitand', 'YES'); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_appender_code', 'YES'); $END
     IF bitand(x_logger.enabled_appenders, get_appender_code(c_table_appender)) > 0 THEN
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('log_table',  'YES'); $END
       log_table(x_logger.app, x_logger.logger, x_level, x_message, x_log_call_stack, x_log_backtrace);
     END IF;
 
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bitand', 'YES'); $END
     $IF  dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_appender_code', 'YES'); $END
     IF bitand(x_logger.enabled_appenders, get_appender_code(c_dbms_output_appender)) > 0 THEN
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('log_stdout',  'YES'); $END
       log_stdout(x_logger.app, x_logger.logger, x_level, x_message, x_log_call_stack, x_log_backtrace);
     END IF;
 
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bitand', 'YES'); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_appender_code', 'YES'); $END
     IF bitand(x_logger.enabled_appenders, get_appender_code(c_smtp_appender)) > 0 THEN
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('log_smtp',  'YES'); $END
       log_smtp(x_logger.app, x_logger.logger, x_level, x_message, x_log_call_stack, x_log_backtrace);
     END IF;
 
@@ -2110,10 +2191,15 @@ BEGIN
 
   $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name', 'YES'); $END
   g_root_logger_hash := hash_logger_name(c_root_logger_name);
+  $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('init_user_app', 'YES'); $END
   init_user_app;
+  $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('init_params', 'YES'); $END
   init_params(c_global_flag);
+  $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('init_levels', 'YES'); $END
   init_levels;
+  $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('init_appenders', 'YES'); $END
   init_appenders(c_global_flag);
+  $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('init_loggers', 'YES'); $END
   init_loggers(c_global_flag);
 END logging;
 /
