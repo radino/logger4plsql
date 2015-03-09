@@ -44,9 +44,9 @@ CREATE OR REPLACE PACKAGE logging IS
   c_false CONSTANT ctx_boolean := 'F';
 
   /** Constant indicating whether current database version is 11.2 or greater. */
-  ver_ge_11_2 CONSTANT BOOLEAN :=
-    $IF (dbms_db_version.version > 11) -- greater then 11
-     OR (dbms_db_version.version = 11 AND dbms_db_version.release >= 2) -- or equal to 11.2
+  ver_lt_11_2 CONSTANT BOOLEAN :=
+    $IF (dbms_db_version.version < 11) -- less than 11
+     OR (dbms_db_version.version = 11 AND dbms_db_version.release < 2) -- or less than 11.2
     $THEN TRUE
     $ELSE FALSE
     $END;
@@ -189,9 +189,9 @@ CREATE OR REPLACE PACKAGE logging IS
                           o_app        OUT VARCHAR2,
                           x_method     IN VARCHAR2 DEFAULT NULL,
                           x_call_stack IN VARCHAR2 DEFAULT dbms_utility.format_call_stack());
-    PROCEDURE set_context_on_rac(x_namespace      IN ctx_namespace_type,
-                                 x_attribute      IN ctx_attribute_type,
-                                 x_value          IN ctx_value_type);
+    PROCEDURE set_context_rac_aware(x_namespace      IN ctx_namespace_type,
+                                    x_attribute      IN ctx_attribute_type,
+                                    x_value          IN ctx_value_type);
     PROCEDURE send_buffer(x_app IN t_app_appender.app%TYPE);
     PROCEDURE unimplemented;
   $END
@@ -570,8 +570,6 @@ CREATE OR REPLACE PACKAGE logging IS
   * @param x_app Application name.
   */
   PROCEDURE remove_app(x_app IN t_app.app%TYPE);
-
-
 
   /**
   * Procedure sets given attribute of given context to given value.
