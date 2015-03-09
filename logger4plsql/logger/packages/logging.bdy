@@ -170,6 +170,71 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     END IF;
   END set_context;
 
+  
+  /**
+  * Procedure clears all contexts. 
+  * For internal use only. Do not use.
+  * @param x_namespace Name of context
+  * @raises e_internal_use_only Can not be called from another schema.
+  */
+  PROCEDURE clear_all_context(x_namespace IN ctx_namespace_type) IS
+  BEGIN
+    IF c_user <> c_schema_name THEN
+      raise_application_error(-20003, 'For internal use only');
+    END IF;    
+    dbms_session.clear_all_context(x_namespace);
+  END clear_all_context;
+  
+  /**
+  * Procedure clears all contexts. 
+  * @param x_namespace Name of context
+  * @raises e_internal_use_only Can not be called from another schema.
+  */
+  PROCEDURE clear_all_context_rac_aware(x_namespace IN ctx_namespace_type) IS
+    l_instance_count NUMBER;
+    l_instance_table dbms_utility.instance_table;
+    l_what           user_jobs.what%TYPE;
+    e_invalid_instance EXCEPTION;
+    PRAGMA EXCEPTION_INIT(e_invalid_instance, -23428);
+  BEGIN
+    -- until 11.2 the context changes are not replicated across the instances
+    -- a workaround is to use an instance affinity for jobs to set the context on all active instances
+    $IF logging.ver_lt_11_2 $THEN      
+    dbms_utility.active_instances(instance_table => l_instance_table, instance_count => l_instance_count);
+
+    IF l_instance_count = 0  THEN 
+      dbms_session.clear_all_context(x_namespace => x_namespace); 
+      RETURN;
+    END IF;    
+
+    l_what := 'logging.clear_all_context(''' || x_namespace || ''');';
+    
+    DECLARE 
+      PRAGMA AUTONOMOUS_TRANSACTION;
+    BEGIN
+      FOR i IN 1 .. l_instance_count LOOP
+        BEGIN
+          dbms_job.submit(job       => l_job_number,
+                          what      => l_what,
+                          next_date => SYSDATE,
+                          INTERVAL  => NULL,
+                          instance  => l_instance_table(i).inst_number);
+          -- if there is no such instance ignore error (or it is not running)
+        EXCEPTION
+          WHEN e_invalid_instance THEN
+            NULL;
+        END;
+
+      END LOOP;
+      COMMIT;
+    END;
+    $ELSE
+      -- if the database version is >=11.2, applicaton context is replicated across the instances
+      dbms_session.clear_all_context(namespace => x_namespace);
+    $END
+  END clear_all_context_rac_aware;
+  
+
   /** Procedure sets given attribute of given context to the given value. 
   * Procedure is RAC-aware. If the database is in RAC the context is set 
   * @param x_namespace Name of context
@@ -1945,16 +2010,16 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   BEGIN
     FOR l_row IN (SELECT a.base_context_name
                     FROM t_appender a) LOOP
-      dbms_session.clear_all_context(l_row.base_context_name || '_G');
+      clear_all_context_rac_aware(l_row.base_context_name || '_G');
     END LOOP;
-    dbms_session.clear_all_context(c_additivity_ctx(c_global_flag));
-    dbms_session.clear_all_context(c_global_appenders_ctx);
-    dbms_session.clear_all_context(c_logger_levels_ctx(c_global_flag));
-    dbms_session.clear_all_context(c_global_levels_ctx);
-    dbms_session.clear_all_context(c_logger_names_ctx(c_global_flag));
-    dbms_session.clear_all_context(c_parameters_ctx(c_global_flag));
-    dbms_session.clear_all_context(c_global_user_app_ctx);
-    dbms_session.clear_all_context(c_logger_appenders_ctx(c_global_flag));
+    clear_all_context_rac_aware(c_additivity_ctx(c_global_flag));
+    clear_all_context_rac_aware(c_global_appenders_ctx);
+    clear_all_context_rac_aware(c_logger_levels_ctx(c_global_flag));
+    clear_all_context_rac_aware(c_global_levels_ctx);
+    clear_all_context_rac_aware(c_logger_names_ctx(c_global_flag));
+    clear_all_context_rac_aware(c_parameters_ctx(c_global_flag));
+    clear_all_context_rac_aware(c_global_user_app_ctx);
+    clear_all_context_rac_aware(c_logger_appenders_ctx(c_global_flag));
   END purge_global_contexts;
 
   /** Procedure purges all session contexts used by logging */

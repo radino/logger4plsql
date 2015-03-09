@@ -118,6 +118,7 @@ CREATE OR REPLACE PACKAGE logging IS
     PROCEDURE init_log_level_severities;
     $END
     FUNCTION bool_to_int(x_boolean IN BOOLEAN) RETURN NUMBER;
+    PROCEDURE clear_all_context_rac_aware(x_namespace IN ctx_namespace_type);
     FUNCTION dequeue_from_cyclic_buffer RETURN VARCHAR2;
     PROCEDURE enqueue_into_cyclic_buffer(x_app IN VARCHAR2, x_message IN message_type);
     FUNCTION format_call_stack RETURN VARCHAR2;
@@ -582,6 +583,14 @@ CREATE OR REPLACE PACKAGE logging IS
   PROCEDURE set_context(x_namespace IN ctx_namespace_type,
                         x_attribute IN ctx_attribute_type,
                         x_value     IN ctx_value_type);
+                        
+  /**
+  * Procedure clears all contexts. 
+  * For internal use only. Do not use.
+  * @param x_namespace Name of context
+  * @raises e_internal_use_only Can not be called from another schema.
+  */
+  PROCEDURE clear_all_context(x_namespace IN ctx_namespace_type);
 
 END logging;
 /
