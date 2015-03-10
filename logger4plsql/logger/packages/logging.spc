@@ -8,8 +8,16 @@ CREATE OR REPLACE PACKAGE logging IS
   * {*} twitter             http://twitter.com/radoslavgolian
   * (*) project page        https://github.com/radino/logger4plsql/
   * @author Radoslav Golian
+  * @usage The package may be compiled with these flags:
+  *  {*} debug      If set on TRUE, the package is compiled with internal debugging
+  *  {*} unit_test  If set on TRUE, all the methods are defined as public to support unit testing.
+  * e.g. These settings are used for development of the logging functionality:
+  * ALTER PACKAGE logging COMPILE PLSQL_CCFLAGS = 'debug:TRUE, unit_test:TRUE' REUSE SETTINGS
+  * and these settings should be used for production
+  * ALTER PACKAGE logging COMPILE PLSQL_CCFLAGS = 'debug:FALSE, unit_test:FALSE' REUSE SETTINGS
   */
-  
+
+ 
   /** Type for parameter names. */
   TYPE param_names_type IS TABLE OF user_objects.object_name%TYPE;
 
@@ -98,12 +106,13 @@ CREATE OR REPLACE PACKAGE logging IS
   c_smtp_appender CONSTANT t_appender.appender%TYPE := 'SMTP';
 
   -- these elements are defined only if internal debugging is set to TRUE
-  $IF logging_settings.c_precompiler_debug $THEN
-     g_internal_log_level t_log_level.log_level%TYPE := c_error_level; 
+  $IF $$debug $THEN
+     g_internal_log_level t_log_level.log_level%TYPE := c_error_level;
+     g_internal_appenders PLS_INTEGER := 3;
   $END
 
   -- these elements are public only when unit testing precompiler option is set to TRUE
-  $IF logging_settings.c_precompiler_unit_test $THEN
+  $IF $$unit_test $THEN
     -- types and variables
     SUBTYPE visibility_type IS PLS_INTEGER RANGE 1 .. 2;
     c_global_flag CONSTANT visibility_type := 1;
@@ -111,10 +120,11 @@ CREATE OR REPLACE PACKAGE logging IS
 
     -- methods
     -- internal debugger private methods
-    $IF logging_settings.c_precompiler_debug $THEN
-    PROCEDURE internal_log(x_level   IN t_log_level.log_level%TYPE,
-                           x_logger  IN t_logger.logger%TYPE,
-                           x_message IN message_type);
+    $IF $$debug $THEN
+    PROCEDURE internal_log(x_level    IN t_log_level.log_level%TYPE,
+                         x_logger   IN t_logger.logger%TYPE,
+                         x_message  IN message_type,
+                         x_appender IN PLS_INTEGER DEFAULT g_internal_appenders);
     PROCEDURE init_log_level_severities;
     $END
     FUNCTION bool_to_int(x_boolean IN BOOLEAN) RETURN NUMBER;

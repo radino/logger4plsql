@@ -56,7 +56,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   g_root_logger_hash hash_type;
 
   -- these elements are defined only if internal debugging is set to TRUE
-  $IF logging_settings.c_precompiler_debug $THEN
+  $IF $$debug $THEN
   /** Type for severity collection for the internal debugging. */
   TYPE log_level_severity_type IS TABLE OF PLS_INTEGER INDEX BY t_log_level.log_level%TYPE;
   /** Collection for severities for the internal debugging. */
@@ -65,7 +65,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
   -- these elements are public when unit testing precompiler option is set to TRUE
   -- therefore they cannot be defined in the body
-  $IF NOT logging_settings.c_precompiler_unit_test $THEN
+  $IF NOT $$unit_test OR $$unit_test IS NULL $THEN
   /** Type for visibility: session or global */
   SUBTYPE visibility_type IS PLS_INTEGER RANGE 1 .. 2;
 
@@ -141,10 +141,68 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   /** Qualified name of this package. */
   c_package_name CONSTANT ctx_namespace_type := c_schema_name || '.' || $$PLSQL_UNIT;
 
+   -- these elements are defined only if internal debugging is set to TRUE
+  $IF $$debug $THEN
+  /**
+  * Procedure initializes log level severities for internal debugging
+  */
+  PROCEDURE init_log_level_severities IS    
+  BEGIN
+     FOR l_row IN (select ll.log_level, ll.severity FROM t_log_level ll) LOOP
+       g_log_level_severities(l_row.log_level) := l_row.severity;
+     END LOOP;  
+  END init_log_level_severities;
+  $END
+  
+  -- these elements are defined only if internal debugging is set to TRUE
+  $IF $$debug $THEN
+  /**
+  * Procedure logs given message as an internal log.
+  * @param x_level Log levelof the message.
+  * @param x_logger Logger name.
+  * @param x_message Message.
+  * @param x_appender Binary encoded appenders (1 - table, 2 - dbms_output)
+  */
+  PROCEDURE internal_log(x_level    IN t_log_level.log_level%TYPE,
+                         x_logger   IN t_logger.logger%TYPE,
+                         x_message  IN message_type,
+                         x_appender IN PLS_INTEGER DEFAULT g_internal_appenders) IS
+    PRAGMA AUTONOMOUS_TRANSACTION;
+  BEGIN 
+    IF g_log_level_severities(g_internal_log_level) > g_log_level_severities(x_level) THEN
+       RETURN;
+    END IF;
+    
+    IF bitand(x_appender, 1) = 1 THEN
+      INSERT INTO t_log
+        (id, logger, message, log_date, call_stack, backtrace, log_level)
+      VALUES
+        (seq_log_id.NEXTVAL,
+         x_logger,
+         x_message,
+         systimestamp,
+         NULL,
+         NULL,
+         x_level);
+    END IF;
+    
+    IF bitand(x_appender, 2) = 2 THEN
+      dbms_output.put_line(to_char(systimestamp, 'DD.MM.YYYY HH24:MI:SS.FF3') || ' ' || x_logger ||
+                           '['||x_level||']' || x_message);
+    END IF;
+    
+    COMMIT;
+  END internal_log;
+  $END
+
+
+
   /** Procedure raises uniplemented feature exception.
   */
   PROCEDURE unimplemented IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'unimplemented'; $END
   BEGIN
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Unimplemented feature'); $END 
     raise_application_error('-20999', 'Unimplemented feature');
   END unimplemented;
 
@@ -159,15 +217,30 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   PROCEDURE set_context(x_namespace IN ctx_namespace_type,
                         x_attribute IN ctx_attribute_type,
                         x_value     IN ctx_value_type) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_context'; $END
   BEGIN
-    IF c_user <> c_schema_name THEN
+    $IF $$debug $THEN
+      internal_log(logging.c_info_level, l_intlogger, 'start');
+      internal_log(logging.c_trace_level, l_intlogger, 'x_namespace: ' || x_namespace);
+      internal_log(logging.c_trace_level, l_intlogger, 'x_attribute: ' || x_attribute);
+      internal_log(logging.c_trace_level, l_intlogger, 'x_value: ' || x_value);
+      internal_log(logging.c_trace_level, l_intlogger, 'c_user: ' || c_user);
+      internal_log(logging.c_trace_level, l_intlogger, 'c_schema_name: ' || c_schema_name);
+    $END 
+  
+    IF c_user <> c_schema_name THEN      
+      $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Access violation'); $END       
       raise_application_error(-20003, 'For internal use only');
     END IF;    
     IF x_value IS NULL THEN
+      $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Clearing context'); $END             
       dbms_session.clear_context(x_namespace, x_attribute);
     ELSE
-      dbms_session.set_context(x_namespace, x_attribute, x_value);
+     $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Setting context'); $END
+     dbms_session.set_context(x_namespace, x_attribute, x_value);
     END IF;
+    
+    $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'end'); $END
   END set_context;
 
   
@@ -178,11 +251,24 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @raises e_internal_use_only Can not be called from another schema.
   */
   PROCEDURE clear_all_context(x_namespace IN ctx_namespace_type) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'clear_all_context'; $END
   BEGIN
+    $IF $$debug $THEN
+      internal_log(logging.c_info_level, l_intlogger, 'start');
+      internal_log(logging.c_trace_level, l_intlogger, 'x_namespace: ' || x_namespace);
+      internal_log(logging.c_trace_level, l_intlogger, 'c_user: ' || c_user);
+      internal_log(logging.c_trace_level, l_intlogger, 'c_schema_name: ' || c_schema_name);
+    $END 
+
     IF c_user <> c_schema_name THEN
+      $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Access violation'); $END       
       raise_application_error(-20003, 'For internal use only');
     END IF;    
+  
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Clearing context'); $END
     dbms_session.clear_all_context(x_namespace);
+    
+    $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'end'); $END
   END clear_all_context;
   
   /**
@@ -191,45 +277,71 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @raises e_internal_use_only Can not be called from another schema.
   */
   PROCEDURE clear_all_context_rac_aware(x_namespace IN ctx_namespace_type) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'clear_all_context_rac_aware'; $END
     l_instance_count NUMBER;
     l_instance_table dbms_utility.instance_table;
     l_what           user_jobs.what%TYPE;
     e_invalid_instance EXCEPTION;
     PRAGMA EXCEPTION_INIT(e_invalid_instance, -23428);
   BEGIN
+    $IF $$debug $THEN
+      internal_log(logging.c_info_level, l_intlogger, 'start');
+      internal_log(logging.c_trace_level, l_intlogger, 'x_namespace: ' || x_namespace);
+    $END 
+
     -- until 11.2 the context changes are not replicated across the instances
     -- a workaround is to use an instance affinity for jobs to set the context on all active instances
     $IF logging.ver_lt_11_2 $THEN      
+    $IF $$debug $THEN internal_log(logging.c_warning_level, l_intlogger, 'RAC-aware context not supported.'); $END 
     dbms_utility.active_instances(instance_table => l_instance_table, instance_count => l_instance_count);
+    
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'Number of RAC instances: ' || l_instance_count); $END 
 
     IF l_instance_count = 0  THEN 
+      $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'No RAC - clearing the context' ); $END 
       dbms_session.clear_all_context(x_namespace => x_namespace); 
       RETURN;
     END IF;    
 
     l_what := 'logging.clear_all_context(''' || x_namespace || ''');';
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_what: ' || l_what); $END 
     
     DECLARE 
       PRAGMA AUTONOMOUS_TRANSACTION;
     BEGIN
       FOR i IN 1 .. l_instance_count LOOP
-        BEGIN
+        BEGIN          
+          $IF $$debug $THEN 
+            internal_log(logging.c_trace_level, l_intlogger, 'l_what: ' || l_what); 
+            internal_log(logging.c_trace_level, l_intlogger, 'inst_number: ' || l_instance_table(i).inst_number); 
+          $END 
           dbms_job.submit(job       => l_job_number,
                           what      => l_what,
                           next_date => SYSDATE,
                           INTERVAL  => NULL,
                           instance  => l_instance_table(i).inst_number);
           -- if there is no such instance ignore error (or it is not running)
-        EXCEPTION
+          $IF $$debug $THEN 
+            internal_log(logging.c_trace_level, l_intlogger, 'l_job_number: ' || l_job_number); 
+            internal_log(logging.c_info_level, l_intlogger, 'job created: '); 
+          $END 
+        EXCEPTION          
           WHEN e_invalid_instance THEN
+            $IF $$debug $THEN 
+              internal_log(logging.c_warning_level, l_intlogger, 'Invalid instance: ' || l_instance_table(i).inst_number); 
+            $END 
+
             NULL;
         END;
-
       END LOOP;
       COMMIT;
     END;
     $ELSE
       -- if the database version is >=11.2, applicaton context is replicated across the instances
+      $IF $$debug $THEN 
+        internal_log(logging.c_info_level, l_intlogger, 'RAC >=11.2, context supported'); 
+        internal_log(logging.c_trace_level, l_intlogger, 'Clearing context: ' || x_namespace); 
+      $END 
       dbms_session.clear_all_context(namespace => x_namespace);
     $END
   END clear_all_context_rac_aware;
@@ -1815,50 +1927,6 @@ CREATE OR REPLACE PACKAGE BODY logging IS
        x_level);
     COMMIT;
   END log_table;
-  
-  
-   -- these elements are defined only if internal debugging is set to TRUE
-  $IF logging_settings.c_precompiler_debug $THEN
-  /**
-  * Procedure initializes log level severities for internal debugging
-  */
-  PROCEDURE init_log_level_severities IS    
-  BEGIN
-     FOR l_row IN (select ll.log_level, ll.severity FROM t_log_level ll) LOOP
-       g_log_level_severities(l_row.log_level) := l_row.severity;
-     END LOOP;  
-  END init_log_level_severities;
-  $END
-  
-  -- these elements are defined only if internal debugging is set to TRUE
-  $IF logging_settings.c_precompiler_debug $THEN
-  /**
-  * Procedure logs given message as an internal log.
-  * @param x_level Log levelof the message.
-  * @param x_logger Logger name.
-  * @param x_message Message.
-  */
-  PROCEDURE internal_log(x_level   IN t_log_level.log_level%TYPE,
-                         x_logger  IN t_logger.logger%TYPE,
-                         x_message IN message_type) IS
-    PRAGMA AUTONOMOUS_TRANSACTION;
-  BEGIN 
-    IF g_log_level_severities(g_internal_log_level) > g_log_level_severities(x_level) THEN
-       RETURN;
-    END IF;
-    INSERT INTO t_log
-      (id, logger, message, log_date, call_stack, backtrace, log_level)
-    VALUES
-      (seq_log_id.NEXTVAL,
-       x_logger,
-       x_message,
-       systimestamp,
-       NULL,
-       NULL,
-       x_level);
-    COMMIT;
-  END internal_log;
-  $END
 
   /**
   * Procedure logs given message.
@@ -2185,7 +2253,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
 BEGIN
  -- these elements are defined only if internal debugging is set to TRUE
-  $IF logging_settings.c_precompiler_debug $THEN
+  $IF $$debug $THEN
     init_log_level_severities();
   $END
 
