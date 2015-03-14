@@ -536,7 +536,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       END IF;
     END LOOP;
     l_result := l_result || '</params>';
-    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result; $END
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result); $END
     
     RETURN l_result;
   END serialize_to_xml;
@@ -568,7 +568,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       END IF;
     END LOOP;
     
-    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result; $END
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result); $END
     RETURN l_result;
   END serialize_to_json;
 
@@ -691,8 +691,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   BEGIN
     $IF $$debug $THEN 
       internal_log(logging.c_debug_level, l_intlogger, 'x_ctx: ' || x_ctx); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_initialized: ' || x_initialized); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_visibility: ' || x_initialized); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_initialized: ' || bool_to_int(x_initialized)); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_visibility: ' || x_visibility); 
     $END
 
     IF x_initialized THEN
@@ -823,8 +823,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
       $IF $$debug $THEN 
         internal_log(logging.c_trace_level, l_intlogger, 'c_parameters_ctx(x_visibility): ' || c_parameters_ctx(x_visibility)); 
-        internal_log(logging.c_trace_level, l_intlogger, 'app#param_name: ' || l_row.app || '#' || l_row.param_name)); 
-        internal_log(logging.c_trace_level, l_intlogger, 'param_value: ' || l_row.param_value)); 
+        internal_log(logging.c_trace_level, l_intlogger, 'app#param_name: ' || l_row.app || '#' || l_row.param_name); 
+        internal_log(logging.c_trace_level, l_intlogger, 'param_value: ' || l_row.param_value); 
       $END
       
       set_context_rac_aware(c_parameters_ctx(x_visibility),
@@ -2393,7 +2393,7 @@ BEGIN
   $IF $$debug $THEN
     init_log_level_severities();
   $END
-
+  
   $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name', 'YES'); $END
   g_root_logger_hash := hash_logger_name(c_root_logger_name);
   $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('init_user_app', 'YES'); $END
