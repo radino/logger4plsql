@@ -208,7 +208,6 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
   /**
   * Procedure sets given attribute of given context to given value.
-  * For internal use only. Please do not use.
   * @param x_namespace Name of context
   * @param x_attribute Attribute
   * @param x_value Value of attribute
@@ -220,18 +219,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_context'; $END
   BEGIN
     $IF $$debug $THEN
-      internal_log(logging.c_info_level, l_intlogger, 'start');
-      internal_log(logging.c_trace_level, l_intlogger, 'x_namespace: ' || x_namespace);
-      internal_log(logging.c_trace_level, l_intlogger, 'x_attribute: ' || x_attribute);
-      internal_log(logging.c_trace_level, l_intlogger, 'x_value: ' || x_value);
-      internal_log(logging.c_trace_level, l_intlogger, 'c_user: ' || c_user);
-      internal_log(logging.c_trace_level, l_intlogger, 'c_schema_name: ' || c_schema_name);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_namespace: ' || x_namespace);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_attribute: ' || x_attribute);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_value: ' || x_value);
     $END 
   
-    IF c_user <> c_schema_name THEN      
-      $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Access violation'); $END       
-      raise_application_error(-20003, 'For internal use only');
-    END IF;    
     IF x_value IS NULL THEN
       $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Clearing context'); $END             
       dbms_session.clear_context(x_namespace, x_attribute);
@@ -239,10 +231,37 @@ CREATE OR REPLACE PACKAGE BODY logging IS
      $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Setting context'); $END
      dbms_session.set_context(x_namespace, x_attribute, x_value);
     END IF;
-    
-    $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'end'); $END
   END set_context;
 
+  /**
+  * Procedure sets given attribute of given context to given value.
+  * For internal use only. Please do not use.
+  * @param x_namespace Name of context
+  * @param x_attribute Attribute
+  * @param x_value Value of attribute
+  * @raises e_internal_use_only Can not be called from another schema.
+  */
+  PROCEDURE set_context_job(x_namespace IN ctx_namespace_type,
+                            x_attribute IN ctx_attribute_type,
+                            x_value     IN ctx_value_type) IS                           
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_context_job'; $END
+  BEGIN
+    $IF $$debug $THEN
+      internal_log(logging.c_debug_level, l_intlogger, 'x_namespace: ' || x_namespace);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_attribute: ' || x_attribute);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_value: ' || x_value);
+      internal_log(logging.c_debug_level, l_intlogger, 'c_user: ' || c_user);
+      internal_log(logging.c_debug_level, l_intlogger, 'c_schema_name: ' || c_schema_name);
+    $END 
+
+    IF c_user <> c_schema_name THEN      
+      $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Access violation'); $END       
+      raise_application_error(-20003, 'For internal use only');
+    END IF;    
+    
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_context',  'YES'); $END
+    set_context(x_namespace, x_attribute, x_value);
+  END set_context_job;
   
   /**
   * Procedure clears all contexts. 
@@ -254,10 +273,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'clear_all_context'; $END
   BEGIN
     $IF $$debug $THEN
-      internal_log(logging.c_info_level, l_intlogger, 'start');
-      internal_log(logging.c_trace_level, l_intlogger, 'x_namespace: ' || x_namespace);
-      internal_log(logging.c_trace_level, l_intlogger, 'c_user: ' || c_user);
-      internal_log(logging.c_trace_level, l_intlogger, 'c_schema_name: ' || c_schema_name);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_namespace: ' || x_namespace);
+      internal_log(logging.c_debug_level, l_intlogger, 'c_user: ' || c_user);
+      internal_log(logging.c_debug_level, l_intlogger, 'c_schema_name: ' || c_schema_name);
     $END 
 
     IF c_user <> c_schema_name THEN
@@ -267,16 +285,17 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   
     $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Clearing context'); $END
     dbms_session.clear_all_context(x_namespace);
-    
-    $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'end'); $END
   END clear_all_context;
   
   /**
   * Procedure clears all contexts. 
   * @param x_namespace Name of context
-  * @raises e_internal_use_only Can not be called from another schema.
+  * @param x_visibility Flag, whether global or session contexts should cleared
+  * {*} c_global_flag Set flag for a global context - rac aware
+  * {*} c_session_flag Set flag for a session context - current instance
   */
-  PROCEDURE clear_all_context_rac_aware(x_namespace IN ctx_namespace_type) IS
+  PROCEDURE clear_all_context_rac_aware(x_namespace IN ctx_namespace_type,
+                                        x_visibility IN visibility_type) IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'clear_all_context_rac_aware'; $END
     l_instance_count NUMBER;
     l_instance_table dbms_utility.instance_table;
@@ -284,10 +303,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     e_invalid_instance EXCEPTION;
     PRAGMA EXCEPTION_INIT(e_invalid_instance, -23428);
   BEGIN
-    $IF $$debug $THEN
-      internal_log(logging.c_info_level, l_intlogger, 'start');
-      internal_log(logging.c_trace_level, l_intlogger, 'x_namespace: ' || x_namespace);
-    $END 
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'x_namespace: ' || x_namespace); $END 
 
     -- until 11.2 the context changes are not replicated across the instances
     -- a workaround is to use an instance affinity for jobs to set the context on all active instances
@@ -297,7 +313,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     
     $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'Number of RAC instances: ' || l_instance_count); $END 
 
-    IF l_instance_count = 0  THEN 
+    IF l_instance_count = 0 OR x_visibility = c_session_flag THEN 
       $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'No RAC - clearing the context' ); $END 
       dbms_session.clear_all_context(x_namespace => x_namespace); 
       RETURN;
@@ -345,17 +361,21 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       dbms_session.clear_all_context(namespace => x_namespace);
     $END
   END clear_all_context_rac_aware;
-  
 
   /** Procedure sets given attribute of given context to the given value. 
   * Procedure is RAC-aware. If the database is in RAC the context is set 
   * @param x_namespace Name of context
   * @param x_attribute Attribute
   * @param x_value Value of attribute
+  * @param x_visibility Flag, whether global or session contexts should be initialized.
+  * {*} c_global_flag Set flag for a global context - rac aware
+  * {*} c_session_flag Set flag for a session context - current instance
   */
   PROCEDURE set_context_rac_aware(x_namespace      IN ctx_namespace_type,
                                   x_attribute      IN ctx_attribute_type,
-                                  x_value          IN ctx_value_type) IS
+                                  x_value          IN ctx_value_type,
+                                  x_visibility     IN visibility_type) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_context_rac_aware'; $END
     l_job_number     BINARY_INTEGER;
     l_what           user_jobs.what%TYPE;
     l_instance_count NUMBER;
@@ -364,44 +384,66 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     PRAGMA EXCEPTION_INIT(e_invalid_instance, -23428);
     
   BEGIN    
+    $IF $$debug $THEN
+      internal_log(logging.c_debug_level, l_intlogger, 'x_namespace: ' || x_namespace);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_attribute: ' || x_attribute);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_value: ' || x_value);
+    $END 
+
+
     -- until 11.2 the context changes are not replicated across the instances
     -- a workaround is to use an instance affinity for jobs to set the context on all active instances
-    $IF logging.ver_lt_11_2 $THEN      
-    dbms_utility.active_instances(instance_table => l_instance_table, instance_count => l_instance_count);
+    $IF logging.ver_lt_11_2 $THEN 
+      $IF $$debug $THEN internal_log(logging.c_warning_level, l_intlogger, 'version < 11.2 - RAC aware context not supported'); $END 
+      dbms_utility.active_instances(instance_table => l_instance_table, instance_count => l_instance_count);
+      $IF $$debug $THEN 
+        internal_log(logging.c_debug_level, l_intlogger, 'instance table: ');
+        FOR i IN 1 .. l_instance_count LOOP
+          internal_log(logging.c_trace_level, 'Instance number: ' || l_instance_table(i).instance_number);          
+          internal_log(logging.c_trace_level, 'Instance number: ' || l_instance_table(i).instance_name);
+        END LOOP;
+      $END 
+   
 
-    IF l_instance_count = 0  THEN 
-      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_context',  'YES'); $END
-      set_context(x_namespace => x_namespace, x_attribute => x_attribute, x_value => x_value); 
-      RETURN;
-    END IF;    
+      IF l_instance_count = 0 or x_visibility = c_session_flag  THEN 
+        $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'No RAC - setting the context locally '); $END
+        $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_context',  'YES'); $END
+        set_context(x_namespace => x_namespace, x_attribute => x_attribute, x_value => x_value); 
+        RETURN;
+      END IF;    
 
-    l_what := 'logging.set_context(
-                    ''' || x_namespace || ''',
-                    ''' || x_attribute || ''',
-                    ''' || x_value || '''
-                );';
-    
-    DECLARE 
-      PRAGMA AUTONOMOUS_TRANSACTION;
-    BEGIN
-      FOR i IN 1 .. l_instance_count LOOP
-        BEGIN
-          dbms_job.submit(job       => l_job_number,
-                          what      => l_what,
-                          next_date => SYSDATE,
-                          INTERVAL  => NULL,
-                          instance  => l_instance_table(i).inst_number);
-          -- if there is no such instance ignore error (or it is not running)
-        EXCEPTION
-          WHEN e_invalid_instance THEN
-            NULL;
-        END;
+      l_what := 'logging.set_context_job(
+                      ''' || x_namespace || ''',
+                      ''' || x_attribute || ''',
+                      ''' || x_value || '''
+                  );';
 
-      END LOOP;
-      COMMIT;
-    END;
+      $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'job: ' || l_what); $END
+        
+      DECLARE 
+        PRAGMA AUTONOMOUS_TRANSACTION;
+      BEGIN
+        FOR i IN 1 .. l_instance_count LOOP
+          BEGIN
+            dbms_job.submit(job       => l_job_number,
+                            what      => l_what,
+                            next_date => SYSDATE,
+                            INTERVAL  => NULL,
+                            instance  => l_instance_table(i).inst_number);
+            -- if there is no such instance ignore error (or it is not running)
+            $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'job: ' || l_job_number || ' for instance ' || l_instance_table(i).inst_number); $END
+          EXCEPTION
+            WHEN e_invalid_instance THEN
+              $IF $$debug $THEN internal_log(logging.c_warning_level, l_intlogger, 'Invalid instance: ' || l_instance_table(i).inst_number); $END
+              NULL;
+          END;
+
+        END LOOP;
+        COMMIT;
+      END;
     $ELSE
       -- if the database version is >=11.2, applicaton context is replicated across the instances
+      $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'version >=11.2, rac aware context supported'); $END
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_context',  'YES'); $END
       set_context(x_namespace => x_namespace, x_attribute => x_attribute, x_value => x_value);
     $END
@@ -415,8 +457,13 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   FUNCTION bit_or(x_n1 IN NUMBER,
                   x_n2 IN NUMBER) RETURN NUMBER IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'bit_or'; $END
+    l_result NUMBER;
   BEGIN
-    RETURN x_n1 + x_n2 - bitand(x_n1, x_n2);
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'x_n1: ' || x_n1 || ', x_n2 ' || x_n2); $END
+    l_result := x_n1 + x_n2 - bitand(x_n1, x_n2);
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result); $END
+    RETURN l_result; 
   END bit_or;
 
   /**
@@ -427,9 +474,14 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   FUNCTION bit_xor(x_n1 IN NUMBER,
                    x_n2 IN NUMBER) RETURN NUMBER IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'bit_xor'; $END
+    l_result NUMBER;
   BEGIN
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'x_n1: ' || x_n1 || ', x_n2 ' || x_n2); $END
     -- would be nice to have bitwise shifts in PL/SQL: *2 => << 1
-    RETURN x_n1 + x_n2 - 2 * bitand(x_n1, x_n2);
+    l_result := x_n1 + x_n2 - 2 * bitand(x_n1, x_n2);
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result); $END
+    RETURN l_result;
   END bit_xor;
   
   /* Function translates 3-valued BOOLEAN to NUMBER
@@ -464,13 +516,19 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   FUNCTION serialize_to_xml(x_names  IN param_names_type,
                             x_values IN param_values_type) RETURN VARCHAR2 IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'serialize_to_xml'; $END
     l_result VARCHAR2(4000);
   BEGIN
     IF x_names.FIRST IS NULL THEN
+      $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Names collection is empty'); $END
       RETURN NULL;
     END IF;
     l_result := '<params>';
     FOR i IN x_names.FIRST .. x_names.LAST LOOP
+      $IF $$debug $THEN 
+        internal_log(logging.c_trace_level, l_intlogger, 'x_names('||i||'): ' || x_names(i)); 
+        internal_log(logging.c_trace_level, l_intlogger, 'x_values('||i||'): ' || x_values(i));
+      $END
       IF x_values(i) IS NULL THEN
         l_result := l_result || '<' || x_names(i) || '/>';
       ELSE
@@ -478,6 +536,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       END IF;
     END LOOP;
     l_result := l_result || '</params>';
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result; $END
+    
     RETURN l_result;
   END serialize_to_xml;
 
@@ -489,18 +549,26 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   FUNCTION serialize_to_json(x_names  IN param_names_type,
                              x_values IN param_values_type) RETURN VARCHAR2 IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'serialize_to_json'; $END
     l_result VARCHAR2(4000);
     c_nl CONSTANT VARCHAR2(1) := chr(10);
   BEGIN
     IF x_names.FIRST IS NULL THEN
+      $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Names collection is empty'); $END
       RETURN NULL;
     END IF;
 
     FOR i IN x_names.FIRST .. x_names.LAST LOOP
+      $IF $$debug $THEN 
+        internal_log(logging.c_trace_level, l_intlogger, 'x_names('||i||'): ' || x_names(i)); 
+        internal_log(logging.c_trace_level, l_intlogger, 'x_values('||i||'): ' || x_values(i));
+      $END
       IF x_values(i) IS NULL THEN
         l_result := l_result || x_values(i) || ': ' || x_names(i) || c_nl;
       END IF;
     END LOOP;
+    
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result; $END
     RETURN l_result;
   END serialize_to_json;
 
@@ -529,18 +597,25 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @return Call stack.
   */
   FUNCTION format_call_stack RETURN VARCHAR2 IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'format_call_stack'; $END
     l_header_end  PLS_INTEGER;
     l_logging_end PLS_INTEGER;
     l_call_stack  VARCHAR2(2000 CHAR);
+    l_result VARCHAR2(2000 CHAR);
     c_stack_body_offset CONSTANT PLS_INTEGER := 3;
-  BEGIN
+  BEGIN    
     l_call_stack := dbms_utility.format_call_stack();
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_call_stack: ' || l_call_stack); $END
     -- skip header
     l_header_end := instr(l_call_stack, c_nl, nth => c_stack_body_offset) + c_nl_length;
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_header_end: ' || l_header_end); $END
 
     l_logging_end := instr(l_call_stack, c_nl, instr(l_call_stack, c_package_name, -1, 1));
+   $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_logging_end: ' || l_logging_end); $END    
 
-    RETURN substr(l_call_stack, 1, l_header_end) || substr(l_call_stack, l_logging_end + c_nl_length);
+    l_result := substr(l_call_stack, 1, l_header_end) || substr(l_call_stack, l_logging_end + c_nl_length);
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result); $END    
+    RETURN l_result;
   END format_call_stack;
   
   /**
@@ -549,19 +624,25 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @param x_schema Schema name.
   */
   PROCEDURE add_schema_to_app(x_app    IN t_schema_app.app%TYPE,
-                              x_schema IN t_schema_app.SCHEMA%TYPE DEFAULT USER) IS
+                              x_schema IN t_schema_app.schema%TYPE DEFAULT USER) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'add_schema_to_app'; $END
     PRAGMA AUTONOMOUS_TRANSACTION;
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_schema: ' || x_schema); 
+    $END    
     INSERT INTO t_schema_app
       (SCHEMA, app)
     VALUES
       (upper(x_schema), upper(x_app));
     
-    set_context_rac_aware(c_global_user_app_ctx, upper(x_schema), upper(x_app));
+    set_context_rac_aware(c_global_user_app_ctx, upper(x_schema), upper(x_app), c_global_flag);
 
     COMMIT;
   EXCEPTION
     WHEN dup_val_on_index THEN
+      $IF $$debug $THEN internal_log(logging.c_warn_level, l_intlogger, 'Schema is already assigned to the app'); $END 
       NULL;
   END add_schema_to_app;
 
@@ -571,14 +652,25 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @param x_schema Schema name.
   */
   PROCEDURE remove_schema_from_app(x_app    IN t_schema_app.app%TYPE,
-                                   x_schema IN t_schema_app.SCHEMA%TYPE DEFAULT USER) IS
+                                   x_schema IN t_schema_app.schema%TYPE DEFAULT USER) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'remove_schema_from_app'; $END
     PRAGMA AUTONOMOUS_TRANSACTION;
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_schema: ' || x_schema); 
+    $END    
+
     DELETE FROM t_schema_app ua
      WHERE ua.SCHEMA = upper(x_schema)
        AND ua.app = upper(x_app);
 
-    dbms_session.clear_context(c_global_user_app_ctx, upper(x_schema)); -- it's case insensitive, but for clarity..
+    $IF $$debug $THEN 
+      IF SQL%NOTFOUND THEN
+        internal_log(logging.c_warn_level, l_intlogger, 'Schema is not assigned to the app'); 
+      END IF;
+    $END 
+    set_context_rac_aware(c_global_user_app_ctx, upper(x_schema), NULL, c_global_flag); -- it's case insensitive, but for clarity..
     COMMIT;
   END remove_schema_from_app;
 
@@ -588,15 +680,27 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @param x_initialized Intialization flag.
   * {*} TRUE Set context flag as initialized.
   * {*} FALSE Clear the context. Flag will be NULL.
+  * @param x_visibility Flag, whether global or session contexts should be initialized.
+  * {*} c_global_flag Set flag for a global context - rac aware
+  * {*} c_session_flag Set flag for a session context - current instance
   */
   PROCEDURE set_initialization(x_ctx         IN ctx_namespace_type,
-                               x_initialized IN BOOLEAN) IS
+                               x_initialized IN BOOLEAN,
+                               x_visibility  IN visibility_type) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_initialization'; $END
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_ctx: ' || x_ctx); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_initialized: ' || x_initialized); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_visibility: ' || x_initialized); 
+    $END
+
     IF x_initialized THEN
-      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bool_to_int',  'YES'); $END
-      dbms_session.set_context(x_ctx, c_init_param, bool_to_int(x_initialized));
+      $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Setting the context'); $END      
+      set_context_rac_aware(x_ctx, c_init_param, bool_to_int(x_initialized), x_visibility);
     ELSE
-      dbms_session.clear_context(x_ctx, c_init_param);
+      $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Clearing the context'); $END
+      set_context_rac_aware(x_ctx, c_init_param, NULL, x_visibility);
     END IF;
   END set_initialization;
 
@@ -606,11 +710,16 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @return Flag indication whether is context initialized or not.
   */
   FUNCTION is_initialized(x_ctx IN ctx_namespace_type) RETURN BOOLEAN IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'is_initialized'; $END
   BEGIN
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'x_ctx: ' || x_ctx); $END
+
     IF sys_context(x_ctx, c_init_param) IS NOT NULL THEN
+      $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Result: TRUE'); $END
       RETURN TRUE;
     END IF;
 
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Result: FALSE'); $END
     RETURN FALSE;
   END is_initialized;
 
@@ -618,19 +727,26 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * Procedure initializes a context for log levels. Lazy initialization is used.
   */
   PROCEDURE init_levels IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'init_levels'; $END
   BEGIN
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('is_initialized',  'YES'); $END
     IF is_initialized(c_global_levels_ctx) THEN
+      $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Context already initialized'); $END
       RETURN;
     END IF;
 
     FOR l_row IN (SELECT ll.log_level, ll.severity
                     FROM t_log_level ll) LOOP
-      dbms_session.set_context(c_global_levels_ctx, l_row.log_level, l_row.severity);
+      $IF $$debug $THEN 
+        internal_log(logging.c_trace_level, l_intlogger, 'log_level' || l_row.log_level);
+        internal_log(logging.c_trace_level, l_intlogger, 'severity' || l_row.severity);
+      $END
+      set_context_rac_aware(c_global_levels_ctx, l_row.log_level, l_row.severity, c_global_flag);
     END LOOP;
-    
+
+    $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Context has been initialized'); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_initialization',  'YES'); $END
-    set_initialization(c_global_levels_ctx, TRUE);
+    set_initialization(c_global_levels_ctx, TRUE, c_global_flag);
   END init_levels;
 
   /**
@@ -641,43 +757,48 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * {*} c_session_flag Initialize session contexts
   */
   PROCEDURE init_appenders(x_visibility IN visibility_type DEFAULT c_global_flag) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'init_appenders'; $END
     l_current_appender_ctx ctx_namespace_type;
     l_ctx_suffix           VARCHAR2(2);
   BEGIN
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'x_visibility: ' || x_visibility); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('is_initialized',  'YES'); $END
     IF x_visibility = c_global_flag AND is_initialized(c_global_appenders_ctx) THEN
       RETURN;
     END IF;
 
     l_ctx_suffix := CASE x_visibility WHEN c_global_flag THEN '_G' ELSE '_L' END;
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_ctx_suffix: ' || l_ctx_suffix); $END
 
     FOR l_row IN (SELECT a.appender, a.code, a.base_context_name
                     FROM t_appender a) LOOP
 
       l_current_appender_ctx := l_row.base_context_name || l_ctx_suffix;
+      $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_current_appender_ctx: ' || l_current_appender_ctx); $END
 
       -- there is no session context for appenders
       IF x_visibility = c_global_flag THEN
-        dbms_session.set_context(c_global_appenders_ctx, l_row.appender, l_row.base_context_name);
-      END IF;
-
-      dbms_session.set_context(l_current_appender_ctx, 'DEFAULT#CODE', l_row.code);
+        set_context_rac_aware(c_global_appenders_ctx, l_row.appender, l_row.base_context_name, c_global_flag);
+      END IF;      
+      
+      set_context_rac_aware(l_current_appender_ctx, 'DEFAULT#CODE', l_row.code, x_visibility);
 
       FOR l_row2 IN (SELECT aa.app, aa.parameter_name, aa.parameter_value
                        FROM t_app_appender aa
                       WHERE aa.appender = l_row.appender) LOOP
-        dbms_session.set_context(l_current_appender_ctx,
-                                 l_row2.app || '#' || l_row2.parameter_name,
-                                 l_row2.parameter_value);
+        set_context_rac_aware(l_current_appender_ctx,
+                              l_row2.app || '#' || l_row2.parameter_name,
+                              l_row2.parameter_value,
+                              x_visibility);
       END LOOP;
-      
+
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_initialization',  'YES'); $END
-      set_initialization(l_current_appender_ctx, TRUE);
+      set_initialization(l_current_appender_ctx, TRUE, x_visibility);
     END LOOP;
 
     IF x_visibility = c_global_flag THEN
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_initialization',  'YES'); $END
-      set_initialization(c_global_appenders_ctx, TRUE);
+      set_initialization(c_global_appenders_ctx, TRUE, c_global_flag);
     END IF;
   END init_appenders;
 
@@ -689,7 +810,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * {*} c_session_flag Initialize session contexts
   */
   PROCEDURE init_params(x_visibility IN visibility_type DEFAULT c_global_flag) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'init_params'; $END
   BEGIN
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'x_visibility: ' || x_visibility); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('is_initialized',  'YES'); $END
     IF is_initialized(c_parameters_ctx(x_visibility)) THEN
       RETURN;
@@ -697,13 +820,21 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
     FOR l_row IN (SELECT p.app, p.param_name, p.param_value
                     FROM t_param p) LOOP
-      dbms_session.set_context(c_parameters_ctx(x_visibility),
-                               l_row.app || '#' || l_row.param_name,
-                               l_row.param_value);
+
+      $IF $$debug $THEN 
+        internal_log(logging.c_trace_level, l_intlogger, 'c_parameters_ctx(x_visibility): ' || c_parameters_ctx(x_visibility)); 
+        internal_log(logging.c_trace_level, l_intlogger, 'app#param_name: ' || l_row.app || '#' || l_row.param_name)); 
+        internal_log(logging.c_trace_level, l_intlogger, 'param_value: ' || l_row.param_value)); 
+      $END
+      
+      set_context_rac_aware(c_parameters_ctx(x_visibility),
+                            l_row.app || '#' || l_row.param_name,
+                            l_row.param_value,
+                            x_visibility);
     END LOOP;
     
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_initialization',  'YES'); $END
-    set_initialization(c_parameters_ctx(x_visibility), TRUE);
+    set_initialization(c_parameters_ctx(x_visibility), TRUE, x_visibility);
   END init_params;
 
   /**
@@ -728,15 +859,15 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
     FOR l_row IN (SELECT l.logger, l.log_level, l.appenders, l.additivity
                     FROM t_logger l) LOOP
-      l_hlogger := hash_logger_name(l_row.logger);
-      dbms_session.set_context(c_logger_names_ctx(x_visibility), l_hlogger, l_row.logger);
-      dbms_session.set_context(c_logger_levels_ctx(x_visibility), l_hlogger, l_row.log_level);
-      dbms_session.set_context(c_logger_appenders_ctx(x_visibility), l_hlogger, l_row.appenders);
-      dbms_session.set_context(c_additivity_ctx(x_visibility), l_hlogger, l_row.additivity);
+      l_hlogger := hash_logger_name(l_row.logger);      
+      set_context_rac_aware(c_logger_names_ctx(x_visibility), l_hlogger, l_row.logger, x_visibility);
+      set_context_rac_aware(c_logger_levels_ctx(x_visibility), l_hlogger, l_row.log_level, x_visibility);
+      set_context_rac_aware(c_logger_appenders_ctx(x_visibility), l_hlogger, l_row.appenders, x_visibility);
+      set_context_rac_aware(c_additivity_ctx(x_visibility), l_hlogger, l_row.additivity, x_visibility);
     END LOOP;
      
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_initialization',  'YES'); $END
-    set_initialization(c_logger_names_ctx(x_visibility), TRUE);
+    set_initialization(c_logger_names_ctx(x_visibility), TRUE, x_visibility);
   END init_loggers;
 
   /**
@@ -752,11 +883,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
     FOR l_row IN (SELECT ua.SCHEMA, ua.app
                     FROM t_schema_app ua) LOOP
-      dbms_session.set_context(c_global_user_app_ctx, l_row.SCHEMA, l_row.app);
+      set_context_rac_aware(c_global_user_app_ctx, l_row.SCHEMA, l_row.app, c_global_flag);
     END LOOP;
     
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_initialization',  'YES'); $END
-    set_initialization(c_global_user_app_ctx, TRUE);
+    set_initialization(c_global_user_app_ctx, TRUE, c_global_flag);
   END init_user_app;
 
   /**
@@ -768,9 +899,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   PROCEDURE set_session_ctx_usage(x_usage IN BOOLEAN) IS
   BEGIN
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bool_to_int',  'YES'); $END
-    dbms_session.set_context(c_parameters_ctx(c_session_flag),
-                             c_session_usage_param,
-                             bool_to_int(x_usage));
+    set_context_rac_aware(c_parameters_ctx(c_session_flag),
+                          c_session_usage_param,
+                          bool_to_int(x_usage),
+                          c_session_flag);
   END set_session_ctx_usage;
 
   /**
@@ -836,7 +968,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     
     set_context_rac_aware(sys_context(c_global_appenders_ctx, x_appender) || '_G',
                           x_app || '#' || x_parameter_name,
-                          x_parameter_value);
+                          x_parameter_value,
+                          c_global_flag);
 
     COMMIT;
   END set_global_appender_param;
@@ -853,9 +986,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                                        x_parameter_name  IN t_app_appender.parameter_name%TYPE,
                                        x_parameter_value IN t_app_appender.parameter_value%TYPE) IS
   BEGIN
-    dbms_session.set_context(sys_context(c_global_appenders_ctx, x_appender) || '_L',
-                             x_app || '#' || x_parameter_name,
-                             x_parameter_value);
+    set_context_rac_aware(sys_context(c_global_appenders_ctx, x_appender) || '_L',
+                          x_app || '#' || x_parameter_name,
+                          x_parameter_value,
+                          c_session_flag);
   END set_session_appender_param;
 
   /**
@@ -1134,9 +1268,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger := hash_logger_name(x_logger_name);
     
-    set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name);
-    set_context_rac_aware(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders);
-    set_context_rac_aware(c_additivity_ctx(c_global_flag), l_hlogger, l_additivity);
+    set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name, c_global_flag);
+    set_context_rac_aware(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders, c_global_flag);
+    set_context_rac_aware(c_additivity_ctx(c_global_flag), l_hlogger, l_additivity, c_global_flag);
  
     COMMIT;
   END add_global_appender;
@@ -1184,9 +1318,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger := hash_logger_name(x_logger_name);
 
-    set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name);
-    set_context_rac_aware(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders);
-    set_context_rac_aware(c_additivity_ctx(c_global_flag), l_hlogger, l_additivity);
+    set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name, c_global_flag);
+    set_context_rac_aware(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders, c_global_flag);
+    set_context_rac_aware(c_additivity_ctx(c_global_flag), l_hlogger, l_additivity, c_global_flag);
 
     COMMIT;
   END set_global_additivity;
@@ -1233,8 +1367,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
       l_hlogger := hash_logger_name(x_logger_name);
 
-      set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name);
-      set_context_rac_aware(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders);
+      set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name, c_global_flag);
+      set_context_rac_aware(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders, c_global_flag);
     END IF;
 
     COMMIT;
@@ -1269,12 +1403,13 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_appenders := nvl(sys_context(c_logger_appenders_ctx(c_session_flag), l_hlogger), 0);
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bit_or',  'YES'); $END
     l_appenders := bit_or(l_appenders, l_code);
-    dbms_session.set_context(c_logger_names_ctx(c_session_flag), l_hlogger, x_logger_name);
-    dbms_session.set_context(c_logger_appenders_ctx(c_session_flag), l_hlogger, l_appenders);
+    set_context_rac_aware(c_logger_names_ctx(c_session_flag), l_hlogger, x_logger_name, c_session_flag);
+    set_context_rac_aware(c_logger_appenders_ctx(c_session_flag), l_hlogger, l_appenders, c_session_flag);
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bool_to_int',  'YES'); $END
-    dbms_session.set_context(c_additivity_ctx(c_session_flag),
-                             l_hlogger,
-                             bool_to_int(x_additivity));
+    set_context_rac_aware(c_additivity_ctx(c_session_flag),
+                          l_hlogger,
+                          bool_to_int(x_additivity),
+                          c_session_flag);
   END add_session_appender;
 
   /**
@@ -1290,12 +1425,13 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger   := hash_logger_name(x_logger_name);
     l_appenders := nvl(sys_context(c_logger_appenders_ctx(c_session_flag), l_hlogger), 0);
-    dbms_session.set_context(c_logger_names_ctx(c_session_flag), l_hlogger, x_logger_name);
-    dbms_session.set_context(c_logger_appenders_ctx(c_session_flag), l_hlogger, l_appenders);
+    set_context_rac_aware(c_logger_names_ctx(c_session_flag), l_hlogger, x_logger_name, c_session_flag);
+    set_context_rac_aware(c_logger_appenders_ctx(c_session_flag), l_hlogger, l_appenders, c_session_flag);
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bool_to_int',  'YES'); $END
-    dbms_session.set_context(c_additivity_ctx(c_session_flag),
-                             l_hlogger,
-                             bool_to_int(x_additivity));
+    set_context_rac_aware(c_additivity_ctx(c_session_flag),
+                          l_hlogger,
+                          bool_to_int(x_additivity),
+                          c_session_flag);
   END set_session_additivity;
 
   /**
@@ -1324,7 +1460,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
     set_context_rac_aware(c_parameters_ctx(c_global_flag),
                           x_app || '#' || x_param_name,
-                          x_param_value);
+                          x_param_value,
+                          c_global_flag);
 
     COMMIT;
   END set_global_parameter;
@@ -1339,7 +1476,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                                   x_param_name  IN t_param.param_name%TYPE,
                                   x_param_value IN t_param.param_value%TYPE) IS
   BEGIN
-    dbms_session.set_context(c_parameters_ctx(c_session_flag), x_app || '#' || x_param_name, x_param_value);
+    set_context_rac_aware(c_parameters_ctx(c_session_flag), x_app || '#' || x_param_name, x_param_value, c_session_flag);
   END set_session_parameter;
 
   /**
@@ -1387,7 +1524,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     IF bitand(l_appenders, l_code) > 0 THEN
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bit_xor',  'YES'); $END
       l_appenders := bit_xor(l_appenders, l_code);
-      dbms_session.set_context(c_logger_appenders_ctx(c_session_flag), l_hlogger, l_appenders);
+      set_context_rac_aware(c_logger_appenders_ctx(c_session_flag), l_hlogger, l_appenders, c_session_flag);
     END IF;
   END remove_session_appender;
 
@@ -1428,8 +1565,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger := hash_logger_name(x_logger_name);
 
-    set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name);
-    set_context_rac_aware(c_logger_levels_ctx(c_global_flag), l_hlogger, x_log_level);
+    set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name, c_global_flag);
+    set_context_rac_aware(c_logger_levels_ctx(c_global_flag), l_hlogger, x_log_level, c_global_flag);
 
     COMMIT;
   END set_global_level;
@@ -1445,8 +1582,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   BEGIN
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger := hash_logger_name(x_logger_name);
-    dbms_session.set_context(c_logger_names_ctx(c_session_flag), l_hlogger, x_logger_name);
-    dbms_session.set_context(c_logger_levels_ctx(c_session_flag), l_hlogger, x_log_level);
+    set_context_rac_aware(c_logger_names_ctx(c_session_flag), l_hlogger, x_logger_name, c_session_flag);
+    set_context_rac_aware(c_logger_levels_ctx(c_session_flag), l_hlogger, x_log_level, c_session_flag);
   END set_session_level;
 
   /**
@@ -2159,16 +2296,16 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   BEGIN
     FOR l_row IN (SELECT a.base_context_name
                     FROM t_appender a) LOOP
-      clear_all_context_rac_aware(l_row.base_context_name || '_G');
+      clear_all_context_rac_aware(l_row.base_context_name || '_G', c_global_flag);
     END LOOP;
-    clear_all_context_rac_aware(c_additivity_ctx(c_global_flag));
-    clear_all_context_rac_aware(c_global_appenders_ctx);
-    clear_all_context_rac_aware(c_logger_levels_ctx(c_global_flag));
-    clear_all_context_rac_aware(c_global_levels_ctx);
-    clear_all_context_rac_aware(c_logger_names_ctx(c_global_flag));
-    clear_all_context_rac_aware(c_parameters_ctx(c_global_flag));
-    clear_all_context_rac_aware(c_global_user_app_ctx);
-    clear_all_context_rac_aware(c_logger_appenders_ctx(c_global_flag));
+    clear_all_context_rac_aware(c_additivity_ctx(c_global_flag), c_global_flag);
+    clear_all_context_rac_aware(c_global_appenders_ctx, c_global_flag);
+    clear_all_context_rac_aware(c_logger_levels_ctx(c_global_flag), c_global_flag);
+    clear_all_context_rac_aware(c_global_levels_ctx, c_global_flag);
+    clear_all_context_rac_aware(c_logger_names_ctx(c_global_flag), c_global_flag);
+    clear_all_context_rac_aware(c_parameters_ctx(c_global_flag), c_global_flag);
+    clear_all_context_rac_aware(c_global_user_app_ctx, c_global_flag);
+    clear_all_context_rac_aware(c_logger_appenders_ctx(c_global_flag), c_global_flag);
   END purge_global_contexts;
 
   /** Procedure purges all session contexts used by logging */
@@ -2176,13 +2313,13 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   BEGIN
     FOR l_row IN (SELECT a.base_context_name
                     FROM t_appender a) LOOP
-      dbms_session.clear_all_context(l_row.base_context_name || '_L');
+      clear_all_context_rac_aware(l_row.base_context_name || '_L', c_session_flag);
     END LOOP;
-    dbms_session.clear_all_context(c_additivity_ctx(c_session_flag));
-    dbms_session.clear_all_context(c_logger_appenders_ctx(c_session_flag));
-    dbms_session.clear_all_context(c_logger_levels_ctx(c_session_flag));
-    dbms_session.clear_all_context(c_logger_names_ctx(c_session_flag));
-    dbms_session.clear_all_context(c_parameters_ctx(c_global_flag));
+    clear_all_context_rac_aware(c_additivity_ctx(c_session_flag), c_session_flag);
+    clear_all_context_rac_aware(c_logger_appenders_ctx(c_session_flag), c_session_flag);
+    clear_all_context_rac_aware(c_logger_levels_ctx(c_session_flag), c_session_flag);
+    clear_all_context_rac_aware(c_logger_names_ctx(c_session_flag), c_session_flag);
+    clear_all_context_rac_aware(c_parameters_ctx(c_global_flag), c_session_flag);
   END purge_session_contexts;
 
   /** Procedure copies global setting to session settings */
@@ -2247,7 +2384,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
             and gc.namespace = c_global_user_app_ctx)
             or (gc.attribute like x_app || '#')
     ) LOOP
-       set_context_rac_aware(l_row.namespace, l_row.attribute, NULL);
+       set_context_rac_aware(l_row.namespace, l_row.attribute, NULL, c_global_flag);
     END LOOP;
   END remove_app;
 

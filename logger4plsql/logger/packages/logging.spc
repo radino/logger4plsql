@@ -107,7 +107,7 @@ CREATE OR REPLACE PACKAGE logging IS
 
   -- these elements are defined only if internal debugging is set to TRUE
   $IF $$debug $THEN
-     g_internal_log_level t_log_level.log_level%TYPE := c_error_level;
+     g_internal_log_level t_log_level.log_level%TYPE := c_trace_level;
      g_internal_appenders PLS_INTEGER := 3;
   $END
 
@@ -205,6 +205,9 @@ CREATE OR REPLACE PACKAGE logging IS
                                     x_value          IN ctx_value_type);
     PROCEDURE send_buffer(x_app IN t_app_appender.app%TYPE);
     PROCEDURE unimplemented;
+    PROCEDURE set_context(x_namespace IN ctx_namespace_type,
+                          x_attribute IN ctx_attribute_type,
+                          x_value     IN ctx_value_type);
   $END
 
   /**
@@ -590,9 +593,9 @@ CREATE OR REPLACE PACKAGE logging IS
   * @param x_value Value of attribute
   * @raises e_internal_use_only Can not be called from another schema.
   */
-  PROCEDURE set_context(x_namespace IN ctx_namespace_type,
-                        x_attribute IN ctx_attribute_type,
-                        x_value     IN ctx_value_type);
+  PROCEDURE set_context_job(x_namespace IN ctx_namespace_type,
+                            x_attribute IN ctx_attribute_type,
+                            x_value     IN ctx_value_type);
                         
   /**
   * Procedure clears all contexts. 
