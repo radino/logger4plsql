@@ -108,7 +108,7 @@ CREATE OR REPLACE PACKAGE logging IS
   -- these elements are defined only if internal debugging is set to TRUE
   $IF $$debug $THEN
      g_internal_log_level t_log_level.log_level%TYPE := c_trace_level;
-     g_internal_appenders PLS_INTEGER := 3;
+     g_internal_appenders PLS_INTEGER := 2;
   $END
 
   -- these elements are public only when unit testing precompiler option is set to TRUE

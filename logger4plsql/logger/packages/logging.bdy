@@ -188,7 +188,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     
     IF bitand(x_appender, 2) = 2 THEN
       dbms_output.put_line(to_char(systimestamp, 'DD.MM.YYYY HH24:MI:SS.FF3') || ' ' || x_logger ||
-                           '['||x_level||']' || x_message);
+                           '['||x_level||']: ' || x_message);
     END IF;
     
     COMMIT;
@@ -1344,19 +1344,23 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   FUNCTION get_current_used_appenders(x_logger_name IN t_logger.logger%TYPE) RETURN t_logger.appenders%TYPE IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'get_current_used_appenders'; $END
+    l_result t_logger.appenders%TYPE;
   BEGIN
     $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name); $END
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_session_ctx_usage',  'YES'); $END
     IF get_session_ctx_usage() THEN
-      RETURN get_appenders(x_logger_name, 
-                           c_logger_appenders_ctx(c_session_flag),
-                           c_additivity_ctx(c_session_flag));
+      l_result := get_appenders(x_logger_name, 
+                                c_logger_appenders_ctx(c_session_flag),
+                                c_additivity_ctx(c_session_flag));
+    ELSE 
+      l_result := get_appenders(x_logger_name, 
+                               c_logger_appenders_ctx(c_global_flag),
+                               c_additivity_ctx(c_global_flag));
     END IF;
 
-    RETURN get_appenders(x_logger_name, 
-                         c_logger_appenders_ctx(c_global_flag),
-                         c_additivity_ctx(c_global_flag));
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result); $END
+    RETURN l_result;
   END get_current_used_appenders;
 
   /**
@@ -1366,14 +1370,18 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   FUNCTION get_current_used_level(x_logger_name IN t_logger.logger%TYPE) RETURN t_logger.log_level%TYPE IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'get_current_used_level'; $END
+    l_result t_logger.log_level%TYPE;
   BEGIN
     $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_session_ctx_usage',  'YES'); $END
     IF get_session_ctx_usage() THEN
-      RETURN get_level(x_logger_name, c_logger_levels_ctx(c_session_flag));
+      l_result := get_level(x_logger_name, c_logger_levels_ctx(c_session_flag));
+    ELSE
+      l_result := get_level(x_logger_name, c_logger_levels_ctx(c_global_flag));
     END IF;
 
-    RETURN get_level(x_logger_name, c_logger_levels_ctx(c_global_flag));
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result); $END
+    RETURN l_result;
   END get_current_used_level;
 
   /**
@@ -1385,6 +1393,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   PROCEDURE add_global_appender(x_logger_name IN t_logger.logger%TYPE,
                                 x_appender    IN t_appender.appender%TYPE,
                                 x_additivity  IN BOOLEAN DEFAULT TRUE) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'add_global_appender'; $END
     PRAGMA AUTONOMOUS_TRANSACTION;
     l_app        t_schema_app.app%TYPE;
     l_code       t_appender.code%TYPE;
@@ -1392,10 +1401,18 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_hlogger    hash_type;
     l_additivity t_logger.additivity%TYPE;
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_additivity: ' || bool_to_int(x_additivity)); 
+    $END
+
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_app',  'YES'); $END
     l_app := get_app(c_user);
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_app: ' || l_app); $END
 
     IF l_app IS NULL AND c_user NOT IN ('SYS', c_schema_name) THEN
+      $IF $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'no privileges'); $END
       raise_application_error(-20002, 'You have no privilege to set the appender.');
     END IF;
 
@@ -1404,22 +1421,28 @@ CREATE OR REPLACE PACKAGE BODY logging IS
         INTO l_code
         FROM t_appender a
        WHERE a.appender = x_appender;
+      $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_code: ' || l_code); $END
     EXCEPTION
       WHEN no_data_found THEN
+        $IF $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'No such appender'); $END
         raise_application_error(-20001, 'No such appender');
     END;
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bool_to_int',  'YES'); $END
     l_additivity := bool_to_int(x_additivity);
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_additivity: ' || l_additivity); $END
                 
     UPDATE t_logger l
        SET l.appenders = bit_or(l.appenders, l_code), l.additivity = l_additivity
      WHERE l.logger = x_logger_name
     RETURNING appenders INTO l_appenders;
+    
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_appenders: ' || l_appenders); $END
 
     IF SQL%NOTFOUND THEN
       l_appenders := l_code;
 
+      $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Inserting a new row'); $END
       INSERT INTO t_logger
         (logger, appenders, additivity)
       VALUES
@@ -1429,6 +1452,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger := hash_logger_name(x_logger_name);
     
+    $IF $$debug $THEN 
+      internal_log(logging.c_trace_level, l_intlogger, 'l_hlogger: ' || l_hlogger);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name);
+      internal_log(logging.c_debug_level, l_intlogger, 'l_appenders: ' || l_appenders);
+      internal_log(logging.c_trace_level, l_intlogger, 'l_additivity: ' || l_additivity);
+    $END
     set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name, c_global_flag);
     set_context_rac_aware(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders, c_global_flag);
     set_context_rac_aware(c_additivity_ctx(c_global_flag), l_hlogger, l_additivity, c_global_flag);
@@ -1443,6 +1472,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   PROCEDURE set_global_additivity(x_logger_name IN t_logger.logger%TYPE,
                                   x_additivity  IN BOOLEAN) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_global_additivity'; $END
     PRAGMA AUTONOMOUS_TRANSACTION;
     l_app        t_schema_app.app%TYPE;
     l_appenders  t_logger.appenders%TYPE;
@@ -1450,26 +1480,43 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_hlogger    hash_type;
     l_additivity t_logger.additivity%TYPE;
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_additivity: ' || bool_to_int(x_additivity)); 
+    $END
+
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_app',  'YES'); $END
     l_app := get_app(c_user);
 
-    SELECT NULL
-      INTO l_dummy
-      FROM t_schema_app ua
-     WHERE ua.SCHEMA = c_user
-       AND ua.app = l_app;
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_app: ' || l_app); $END
+
+    BEGIN
+      SELECT NULL
+        INTO l_dummy
+        FROM t_schema_app ua
+       WHERE ua.schema = c_user
+         AND ua.app = l_app;
+    EXCEPTION
+      WHEN no_data_found THEN
+        $IF $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'No such application'); $END
+        raise_application_error(-20001, 'No such application');
+    END;
+
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bool_to_int',  'YES'); $END
     l_additivity := bool_to_int(x_additivity);
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_additivity: ' || l_additivity); $END
 
     UPDATE t_logger l
        SET l.additivity = l_additivity
      WHERE l.logger = x_logger_name
     RETURNING appenders INTO l_appenders;
-
+    
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_appenders: ' || l_appenders); $END
     IF SQL%NOTFOUND THEN
       l_appenders := 0;
 
+      $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Creating a new row'); $END
       INSERT INTO t_logger
         (logger, appenders, additivity)
       VALUES
@@ -1478,7 +1525,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger := hash_logger_name(x_logger_name);
-
+    
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'l_hlogger: ' || l_hlogger); 
+      internal_log(logging.c_debug_level, l_intlogger, 'l_additivity: ' || l_appenders); 
+    $END    
+    
     set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name, c_global_flag);
     set_context_rac_aware(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders, c_global_flag);
     set_context_rac_aware(c_additivity_ctx(c_global_flag), l_hlogger, l_additivity, c_global_flag);
@@ -1493,16 +1545,23 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   PROCEDURE remove_global_appender(x_logger_name IN t_logger.logger%TYPE,
                                    x_appender    IN t_appender.appender%TYPE) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'remove_global_appender'; $END
     PRAGMA AUTONOMOUS_TRANSACTION;
     l_app       t_schema_app.app%TYPE;
     l_code      t_appender.code%TYPE;
     l_appenders t_logger.appenders%TYPE;
     l_hlogger   hash_type;
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+    $END    
+
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_app',  'YES'); $END
     l_app := get_app(c_user);
 
     IF l_app IS NULL AND c_user NOT IN ('SYS', c_schema_name) THEN
+      $IF $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'Insufficient privileges for removing appender'); $END
       raise_application_error(-20002, 'You have no privilege to set the appender.');
     END IF;
 
@@ -1513,6 +1572,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
        WHERE a.appender = x_appender;
     EXCEPTION
       WHEN no_data_found THEN
+        $IF $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'Appender not found'); $END
         raise_application_error(-20001, 'No such appender');
     END;
 
@@ -1523,15 +1583,20 @@ CREATE OR REPLACE PACKAGE BODY logging IS
        AND bitand(l.appenders, l_code) > 0
     RETURNING appenders INTO l_appenders;
 
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'New l_appenders:' || l_appenders); $END 
     -- an appender with given code was set for given logger
     IF SQL%FOUND THEN
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
       l_hlogger := hash_logger_name(x_logger_name);
-
+      
+      $IF $$debug $THEN 
+        internal_log(logging.c_trace_level, l_intlogger, 'l_hlogger:' || l_hlogger); 
+        internal_log(logging.c_trace_level, l_intlogger, 'l_appenders:' || l_appenders); 
+      $END 
       set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name, c_global_flag);
       set_context_rac_aware(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders, c_global_flag);
     END IF;
-
+ 
     COMMIT;
   END remove_global_appender;
 
@@ -1544,10 +1609,17 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   PROCEDURE add_session_appender(x_logger_name IN t_logger.logger%TYPE,
                                  x_appender    IN t_appender.appender%TYPE,
                                  x_additivity  IN BOOLEAN DEFAULT TRUE) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'add_session_appender'; $END
     l_appenders t_logger.appenders%TYPE;
     l_code      t_appender.code%TYPE;
     l_hlogger   hash_type;
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_additivity: ' || bool_to_int(x_additivity));
+    $END    
+  
     BEGIN
       SELECT a.code
         INTO l_code
@@ -1555,15 +1627,20 @@ CREATE OR REPLACE PACKAGE BODY logging IS
        WHERE a.appender = x_appender;
     EXCEPTION
       WHEN no_data_found THEN
+        $IF $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'No such appender'); $END    
         raise_application_error(-20001, 'No such appender');
     END;
     
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger := hash_logger_name(x_logger_name);
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_hlogger: ' || l_hlogger); $END    
+
 
     l_appenders := nvl(sys_context(c_logger_appenders_ctx(c_session_flag), l_hlogger), 0);
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_appenders: ' || l_appenders); $END    
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bit_or',  'YES'); $END
     l_appenders := bit_or(l_appenders, l_code);
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_appenders: ' || l_appenders); $END    
     set_context_rac_aware(c_logger_names_ctx(c_session_flag), l_hlogger, x_logger_name, c_session_flag);
     set_context_rac_aware(c_logger_appenders_ctx(c_session_flag), l_hlogger, l_appenders, c_session_flag);
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bool_to_int',  'YES'); $END
@@ -1580,12 +1657,20 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   PROCEDURE set_session_additivity(x_logger_name IN t_logger.logger%TYPE,
                                    x_additivity  IN BOOLEAN) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_session_additivity'; $END
     l_appenders t_logger.appenders%TYPE;
     l_hlogger   hash_type;
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_additivity: ' || bool_to_int(x_additivity));
+    $END    
+
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger   := hash_logger_name(x_logger_name);
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_hlogger: ' || l_hlogger); $END
     l_appenders := nvl(sys_context(c_logger_appenders_ctx(c_session_flag), l_hlogger), 0);
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_appenders: ' || l_appenders); $END
     set_context_rac_aware(c_logger_names_ctx(c_session_flag), l_hlogger, x_logger_name, c_session_flag);
     set_context_rac_aware(c_logger_appenders_ctx(c_session_flag), l_hlogger, l_appenders, c_session_flag);
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bool_to_int',  'YES'); $END
@@ -1604,8 +1689,15 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   PROCEDURE set_global_parameter(x_app         IN t_param.app%TYPE,
                                  x_param_name  IN t_param.param_name%TYPE,
                                  x_param_value IN t_param.param_value%TYPE) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_global_parameter'; $END
     PRAGMA AUTONOMOUS_TRANSACTION;
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_param_name: ' || x_param_name); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_param_value: ' || x_param_value);
+    $END    
+
     MERGE INTO t_param p
     USING (SELECT NULL
              FROM dual) dummy
@@ -1619,6 +1711,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       VALUES
         (x_app, x_param_name, x_param_value);
 
+    $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Merge OK, merged: ' || SQL%ROWCOUNT || ' rows'); $END
     set_context_rac_aware(c_parameters_ctx(c_global_flag),
                           x_app || '#' || x_param_name,
                           x_param_value,
@@ -1636,7 +1729,13 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   PROCEDURE set_session_parameter(x_app         IN t_param.app%TYPE,
                                   x_param_name  IN t_param.param_name%TYPE,
                                   x_param_value IN t_param.param_value%TYPE) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_session_parameter'; $END
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_param_name: ' || x_param_name); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_param_value: ' || x_param_value);
+    $END    
     set_context_rac_aware(c_parameters_ctx(c_session_flag), x_app || '#' || x_param_name, x_param_value, c_session_flag);
   END set_session_parameter;
 
@@ -1648,12 +1747,22 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   FUNCTION get_current_parameter(x_app        IN t_param.app%TYPE,
                                  x_param_name IN t_param.param_name%TYPE) RETURN t_param.param_value%TYPE IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'get_current_parameter'; $END
+    l_result t_param.param_value%TYPE;
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_param_name: ' || x_param_name); 
+    $END    
+
     IF get_session_ctx_usage() THEN
-      RETURN sys_context(c_parameters_ctx(c_session_flag), x_app || '#' || x_param_name);
+      l_result := sys_context(c_parameters_ctx(c_session_flag), x_app || '#' || x_param_name);
+    ELSE
+      l_result := sys_context(c_parameters_ctx(c_global_flag), x_app || '#' || x_param_name);
     END IF;
 
-    RETURN sys_context(c_parameters_ctx(c_global_flag), x_app || '#' || x_param_name);
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result); $END    
+    RETURN l_result;
   END get_current_parameter;
 
   /**
@@ -1663,10 +1772,16 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   PROCEDURE remove_session_appender(x_logger_name IN t_logger.logger%TYPE,
                                     x_appender    IN t_appender.appender%TYPE) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'remove_session_appender'; $END
     l_appenders t_logger.appenders%TYPE;
     l_code      t_appender.code%TYPE;
     l_hlogger   hash_type;
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+    $END    
+
     BEGIN
       SELECT a.code
         INTO l_code
@@ -1674,17 +1789,27 @@ CREATE OR REPLACE PACKAGE BODY logging IS
        WHERE a.appender = x_appender;
     EXCEPTION
       WHEN no_data_found THEN
+        $IF $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'No such appender'); $END 
         raise_application_error(-20001, 'No such appender');
     END;
     
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger   := hash_logger_name(x_logger_name);
     l_appenders := nvl(sys_context(c_logger_appenders_ctx(c_session_flag), l_hlogger), 0);
+
+    $IF $$debug $THEN 
+      internal_log(logging.c_trace_level, l_intlogger, 'l_hlogger' || l_hlogger); 
+      internal_log(logging.c_trace_level, l_intlogger, 'l_appenders' || l_appenders); 
+    $END     
     
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bitand',  'YES'); $END
     IF bitand(l_appenders, l_code) > 0 THEN
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bit_xor',  'YES'); $END
       l_appenders := bit_xor(l_appenders, l_code);
+      $IF $$debug $THEN 
+        internal_log(logging.c_info_level, l_intlogger, 'Removing appender from context' || l_hlogger); 
+        internal_log(logging.c_debug_level, l_intlogger, 'l_appenders' || l_appenders); 
+      $END     
       set_context_rac_aware(c_logger_appenders_ctx(c_session_flag), l_hlogger, l_appenders, c_session_flag);
     END IF;
   END remove_session_appender;
@@ -1696,13 +1821,20 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   PROCEDURE set_global_level(x_logger_name IN t_logger.logger%TYPE,
                              x_log_level   IN t_logger.log_level%TYPE) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_global_level'; $END
     PRAGMA AUTONOMOUS_TRANSACTION;
     l_app       t_schema_app.app%TYPE;
     l_dummy     VARCHAR2(1);
     l_hlogger   hash_type;
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_log_level: ' || x_log_level); 
+    $END    
+
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_app',  'YES'); $END
     l_app := get_app(c_user);
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_app: ' || l_app); $END    
 
     SELECT NULL
       INTO l_dummy
@@ -1723,9 +1855,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       VALUES
         (x_logger_name, x_log_level);
 
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'Merged: ' || SQL%ROWCOUNT || ' rows'); $END    
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger := hash_logger_name(x_logger_name);
 
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_hlogger: ' || l_hlogger); $END    
     set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name, c_global_flag);
     set_context_rac_aware(c_logger_levels_ctx(c_global_flag), l_hlogger, x_log_level, c_global_flag);
 
@@ -1739,10 +1873,17 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   PROCEDURE set_session_level(x_logger_name IN t_logger.logger%TYPE,
                               x_log_level   IN t_logger.log_level%TYPE) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_session_level'; $END
     l_hlogger hash_type;
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_log_level: ' || x_log_level); 
+    $END    
+
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger := hash_logger_name(x_logger_name);
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_hlogger: ' || l_hlogger); $END
     set_context_rac_aware(c_logger_names_ctx(c_session_flag), l_hlogger, x_logger_name, c_session_flag);
     set_context_rac_aware(c_logger_levels_ctx(c_session_flag), l_hlogger, x_log_level, c_session_flag);
   END set_session_level;
@@ -1753,7 +1894,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @return Severity of given log level.
   */
   FUNCTION get_level_severity(x_level IN t_log_level.log_level%TYPE) RETURN t_log_level.severity%TYPE IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'get_level_severity'; $END    
   BEGIN
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'x_level: ' || x_level); $END    
     RETURN CAST(sys_context(c_global_levels_ctx, x_level) AS NUMBER);
   END get_level_severity;
 
@@ -1769,8 +1912,16 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                           x_layout      IN t_app_appender.parameter_value%TYPE,
                           x_logger_name IN t_logger.logger%TYPE,
                           x_level       IN t_logger.log_level%TYPE) RETURN VARCHAR2 IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'format_message'; $END
     l_message t_log.message%TYPE;
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_message: ' || x_message);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_layout: ' || x_layout);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_level: ' || x_level);
+    $END      
+  
     l_message := REPLACE(REPLACE(REPLACE(REPLACE(x_layout, '%m', x_message), '%l', x_logger_name),
                                  '%L',
                                  x_level),
@@ -1784,6 +1935,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     IF instr(l_message, '%c') > 0 THEN
       l_message := REPLACE(l_message, '%c', format_call_stack());
     END IF;
+
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_message: ' || l_message); $END      
     RETURN l_message;
   END format_message;
 
@@ -1792,14 +1945,20 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @param x_app Application
   */
   PROCEDURE init_email_cyclic_buffer(x_app IN VARCHAR2) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'init_email_cyclic_buffer'; $END
   BEGIN
+      $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); $END
       g_mail_buffer.head      := 1;
       g_mail_buffer.tail      := 1;
       g_mail_buffer.buffer    := mail_table_type();
       g_mail_buffer.buff_size := 1000;
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_appender_param',  'YES'); $END
-      g_mail_buffer.buff_size := nvl(get_appender_param(x_app, 'SMTP', 'MAIL_BUFFER_LINES', c_global_flag), 1000);
+      g_mail_buffer.buff_size := coalesce(get_appender_param(x_app, 'SMTP', 'MAIL_BUFFER_LINES', c_global_flag), 1000);
       g_mail_buffer.buffer.EXTEND(g_mail_buffer.buff_size);
+      $IF $$debug $THEN 
+        internal_log(logging.c_trace_level, l_intlogger, 'g_mail_buffer.buff_size: ' || g_mail_buffer.buff_size);
+        internal_log(logging.c_trace_level, l_intlogger, 'g_mail_buffer.buffer.size: ' || g_mail_buffer.buffer.count);
+      $END
   END init_email_cyclic_buffer;
 
   /** Procedure enqueues a message to cyclic buffer (queue).
@@ -1808,34 +1967,48 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @param x_message Message.
   */
   PROCEDURE enqueue_into_cyclic_buffer(x_app IN VARCHAR2, x_message IN message_type) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'enqueue_into_cyclic_buffer'; $END
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_message: ' || x_message); 
+    $END
 
     -- if the size is NULL, buffer was not initialized
     IF g_mail_buffer.buff_size IS NULL THEN
+      $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'initializing buffer'); $END
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('init_email_cyclic_buffer',  'YES'); $END
       init_email_cyclic_buffer(x_app);
     END IF;
 
-    -- enqueque the message
+    -- enqueque the message    
     g_mail_buffer.buffer(g_mail_buffer.tail) := x_message;
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'g_mail_buffer.tail' || g_mail_buffer.tail); $END
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'g_mail_buffer.buffer(g_mail_buffer.tail)' || g_mail_buffer.buffer(g_mail_buffer.tail)); $END
 
-    -- cyclic incrementation of the tail
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'g_mail_buffer.buff_size' || g_mail_buffer.buff_size); $END
+    -- cyclic incrementation of the tail    
     IF g_mail_buffer.tail = g_mail_buffer.buff_size THEN
+      $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'End of buffer, reseting to 1'); $END
       g_mail_buffer.tail := 1;
     ELSE
       g_mail_buffer.tail := g_mail_buffer.tail + 1;
     END IF;
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'g_mail_buffer.tail' || g_mail_buffer.tail); $END
+
 
     -- if the tail position and the head position is the same
     -- then the buffer is full
     IF g_mail_buffer.head = g_mail_buffer.tail THEN
-
+      $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Buffer is full'); $END
       -- discard the first message by cyclic incrementation of the head position
       IF g_mail_buffer.head = g_mail_buffer.buff_size THEN
         g_mail_buffer.head := 1;
       ELSE
         g_mail_buffer.head := g_mail_buffer.head + 1;
       END IF;
+      $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Discarding first message in queue'); $END
+      $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'g_mail_buffer.head' || g_mail_buffer.head); $END
     END IF;
   END enqueue_into_cyclic_buffer;
 
@@ -1843,15 +2016,21 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @return Dequeued message.
   */
   FUNCTION dequeue_from_cyclic_buffer RETURN VARCHAR2 IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'dequeue_from_cyclic_buffer'; $END
     l_last_head PLS_INTEGER;
   BEGIN
     l_last_head := g_mail_buffer.head;
-
+    $IF $$debug $THEN 
+      internal_log(logging.c_trace_level, l_intlogger, 'l_last_head' || l_last_head); 
+      internal_log(logging.c_trace_level, l_intlogger, 'g_mail_buffer.buff_size' || g_mail_buffer.buff_size);
+    $END
+    
     IF g_mail_buffer.head = g_mail_buffer.buff_size THEN
       g_mail_buffer.head := 1;
     ELSE
       g_mail_buffer.head := g_mail_buffer.head + 1;
     END IF;
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'g_mail_buffer.head' || g_mail_buffer.head); $END
     RETURN g_mail_buffer.buffer(l_last_head);
   END dequeue_from_cyclic_buffer;
 
@@ -1862,8 +2041,14 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * {*} FALSE if the buffer is not empty
   */
   FUNCTION is_cyclic_buffer_empty RETURN BOOLEAN IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'is_cyclic_buffer_empty'; $END    
   BEGIN
-    RETURN nvl(g_mail_buffer.head = g_mail_buffer.tail, TRUE);
+    $IF $$debug $THEN 
+      internal_log(logging.c_trace_level, l_intlogger, 'g_mail_buffer.head' || g_mail_buffer.head); 
+      internal_log(logging.c_trace_level, l_intlogger, 'g_mail_buffer.tail' || g_mail_buffer.tail);
+    $END
+
+    RETURN coalesce(g_mail_buffer.head = g_mail_buffer.tail, TRUE);
   END is_cyclic_buffer_empty;
 
   /**
@@ -1877,40 +2062,61 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                         o_app        OUT VARCHAR2,
                         x_method     IN VARCHAR2 DEFAULT NULL,
                         x_call_stack IN VARCHAR2 DEFAULT dbms_utility.format_call_stack()) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'parse_stack'; $END
     l_offset       PLS_INTEGER;
     l_next_nl      PLS_INTEGER;
     l_stack_object VARCHAR2(92 CHAR);
     l_stack_line   VARCHAR2(255 CHAR);
     l_obj_schema   user_users.username%TYPE;
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_method: ' || x_method); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_call_stack: ' || x_call_stack); 
+    $END
+  
     -- end of last line for this package
     l_offset := instr(x_call_stack, c_nl, instr(x_call_stack, c_package_name, pos => -1)) + c_nl_length;
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_offset: ' || l_offset); $END
 
     -- next end of line
     l_next_nl := instr(x_call_stack, c_nl, l_offset);
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_next_nl: ' || l_next_nl); $END
     IF l_next_nl = 0 THEN
       o_logger := c_root_logger_name;
       o_app := c_user;
+      $IF $$debug $THEN 
+        internal_log(logging.c_debug_level, l_intlogger, 'o_logger: ' || o_logger);
+        internal_log(logging.c_debug_level, l_intlogger, 'o_app: ' || o_app);
+      $END
     ELSE
       -- first line after last line of this package
       l_stack_line   := substr(x_call_stack, l_offset, l_next_nl - l_offset);
+      $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_stack_line: ' || l_stack_line); $END
       -- object on that line
       l_stack_object := substr(l_stack_line, instr(l_stack_line, c_space, -1) + 1);
+      $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_stack_object: ' || l_stack_object); $END
       -- schema of the object
       l_obj_schema   := substr(l_stack_object, 1, instr(l_stack_object, '.') - 1);
+      $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_obj_schema: ' || l_obj_schema); $END
       IF x_method IS NOT NULL THEN
         l_stack_object := l_stack_object || '.' || upper(x_method);
       END IF;
+      $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_stack_object: ' || l_stack_object); $END
 
       -- if schema was not determined, logging was called from anonymous block.
       IF l_obj_schema IS NULL THEN
         l_obj_schema := c_user;
       END IF;
+      $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_obj_schema: ' || l_obj_schema); $END
      
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_app',  'YES'); $END
       o_app  := get_app(l_obj_schema);
-
       o_logger := o_app || '.' || l_stack_object;
+
+      $IF $$debug $THEN 
+        internal_log(logging.c_debug_level, l_intlogger, 'o_logger: ' || o_logger);
+        internal_log(logging.c_debug_level, l_intlogger, 'o_app: ' || o_app);
+      $END
     END IF;
 
   END parse_stack;
@@ -1924,8 +2130,14 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   FUNCTION get_logger(x_method          IN VARCHAR2 DEFAULT NULL,
                       x_always_from_ctx IN ctx_boolean DEFAULT c_false) RETURN logger_type IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'get_logger'; $END
     l_logger       logger_type;
   BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_method: ' || x_method); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_always_from_ctx: ' || x_always_from_ctx); 
+    $END
+
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('parse_stack',  'YES'); $END
     parse_stack(l_logger.logger, l_logger.app, x_method);
     l_logger.always_from_ctx := x_always_from_ctx;
@@ -1934,6 +2146,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_logger.log_level_severity := get_level_severity(get_current_used_level(l_logger.logger));
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_appenders',  'YES'); $END
     l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);
+
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.always_from_ctx: ' || l_logger.always_from_ctx); 
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.log_level_severity: ' || l_logger.log_level_severity); 
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.enabled_appenders: ' || l_logger.enabled_appenders); 
+    $END
 
     RETURN l_logger;
   END get_logger;
@@ -1945,18 +2163,23 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @return Logger configuration.
   */
   FUNCTION get_root_logger(x_always_from_ctx IN ctx_boolean DEFAULT c_false) RETURN logger_type IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'get_root_logger'; $END
     l_logger logger_type;
   BEGIN
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'x_always_from_ctx: ' || x_always_from_ctx); $END
+
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('parse_stack',  'YES'); $END
     parse_stack(l_logger.logger, l_logger.app);
     l_logger.logger          := c_root_logger_name;
     l_logger.always_from_ctx := x_always_from_ctx;
-    
+   
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_level',  'YES'); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity',  'YES'); $END
     l_logger.log_level_severity := get_level_severity(get_current_used_level(l_logger.logger));
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_logger.log_level_severity: ' || l_logger.log_level_severity); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_appenders',  'YES'); $END
     l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_logger.enabled_appenders: ' || l_logger.enabled_appenders); $END
     RETURN l_logger;
   END get_root_logger;
 
@@ -1967,17 +2190,23 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @return Logger configuration.
   */
   FUNCTION get_app_logger(x_always_from_ctx IN ctx_boolean DEFAULT c_false) RETURN logger_type IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'get_app_logger'; $END
     l_logger logger_type;
   BEGIN
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'x_always_from_ctx: ' || x_always_from_ctx); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('parse_stack',  'YES'); $END
     parse_stack(l_logger.logger, l_logger.app);
     l_logger.logger          := l_logger.app;
     l_logger.always_from_ctx := x_always_from_ctx;
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_logger.logger: ' || l_logger.logger); $END
+
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_level',  'YES'); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity',  'YES'); $END
     l_logger.log_level_severity := get_level_severity(get_current_used_level(l_logger.logger));
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_logger.log_level_severity: ' || l_logger.log_level_severity); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_appenders',  'YES'); $END
     l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_logger.enabled_appenders: ' || l_logger.enabled_appenders); $END
     RETURN l_logger;
   END get_app_logger;
 
@@ -1988,12 +2217,15 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @return Logger configuration.
   */
   FUNCTION get_schema_logger(x_always_from_ctx IN ctx_boolean DEFAULT c_false) RETURN logger_type IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'get_schema_logger'; $END
     l_logger logger_type;
   BEGIN
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'x_always_from_ctx: ' || x_always_from_ctx); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('parse_stack',  'YES'); $END
     parse_stack(l_logger.logger, l_logger.app);
     l_logger.logger          := l_logger.app || '.' || c_user;
     l_logger.always_from_ctx := x_always_from_ctx;
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_logger.logger: ' || l_logger.logger); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_level',  'YES'); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity',  'YES'); $END
     l_logger.log_level_severity := get_level_severity(get_current_used_level(l_logger.logger));
@@ -2007,47 +2239,64 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @param x_app Application name.
   */
   PROCEDURE send_buffer(x_app IN t_app_appender.app%TYPE) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'send_buffer'; $END
     l_host      t_app_appender.parameter_value%TYPE;
     l_from      t_app_appender.parameter_value%TYPE;
     l_to        t_app_appender.parameter_value%TYPE;
     l_cc        t_app_appender.parameter_value%TYPE;
     l_bcc       t_app_appender.parameter_value%TYPE;
+    l_port      t_app_appender.parameter_value%TYPE;
+    l_timeout   t_app_appender.parameter_value%TYPE;
     l_reply     utl_smtp.reply;
     l_conn      utl_smtp.connection;
     l_offset    PLS_INTEGER;
     l_comma_pos PLS_INTEGER;
     l_csv_list  VARCHAR2(32767);
   BEGIN
-    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
-    l_host := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_HOST');
-    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
-    l_from := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_FROM');
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); $END
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
-    l_conn := utl_smtp.open_connection(host       => l_host,
-                                       port       => get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_PORT'),
-                                       tx_timeout => get_current_appender_param(x_app,
-                                                                                'SMTP',
-                                                                                'SEND_MAIL_TIMEOUT'));
+    l_host := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_HOST');
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_host: ' || l_host); $END
+
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
+    l_from := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_FROM');
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_from: ' || l_from); $END
+    
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
+    l_port := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_PORT');
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_port: ' || l_port); $END
+
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
+    l_timeout := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_TIMEOUT');
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_timeout: ' || l_timeout); $END
+
+    $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
+    l_conn := utl_smtp.open_connection(host => l_host, port => l_port, tx_timeout => l_timeout);
 
     l_reply := utl_smtp.helo(l_conn, l_host);
 
     IF l_reply.code <> 200 THEN
-      NULL;
+      $IF $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'HELO failed'); $END
+      raise_application_error(-20002, 'HELO SMTP command failed');
     END IF;
 
     l_reply := utl_smtp.mail(l_conn, l_from);
 
     IF l_reply.code <> 200 THEN
-      NULL;
+      $IF $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'MAIL failed'); $END
+      raise_application_error(-20002, 'MAIL SMTP command failed');
     END IF;
     
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
     l_to  := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_TO');
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_to: ' || l_to); $END    
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END    
     l_cc  := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_CC');
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_cc: ' || l_cc); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
     l_bcc := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_BCC');
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_bcc: ' || l_bcc); $END
 
     IF l_to IS NOT NULL THEN
       l_csv_list := l_to || ',';
@@ -2060,13 +2309,19 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     IF l_bcc IS NOT NULL THEN
       l_csv_list := l_csv_list || l_bcc || ',';
     END IF;
-
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_csv_list: ' || l_csv_list); $END
+    
     l_offset := 1;
     LOOP
       l_comma_pos := instr(l_csv_list, ',', l_offset);
+      $IF $$debug $THEN 
+        internal_log(logging.c_trace_level, l_intlogger, 'l_comma_pos: ' || l_comma_pos); 
+        internal_log(logging.c_trace_level, l_intlogger, 'l_offset: ' || l_offset); 
+      $END
       EXIT WHEN l_comma_pos = 0;
 
       l_reply := utl_smtp.rcpt(l_conn, substr(l_csv_list, l_offset, l_comma_pos - l_offset));
+      $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_reply.code: ' || l_reply.code); $END
 
       l_offset := l_comma_pos + 1;
     END LOOP;
@@ -2097,9 +2352,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     utl_smtp.close_data(l_conn);
 
     l_reply := utl_smtp.quit(l_conn);
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_reply.code: ' || l_reply.code); $END
 
     IF l_reply.code <> 200 THEN
-      NULL;
+      $IF $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'QUIT command failed'); $END
+      raise_application_error(-20002, 'QUIT SMTP command failed');
     END IF;
 
   END send_buffer;
@@ -2119,6 +2376,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                      x_message       IN message_type,
                      x_call_stack    IN BOOLEAN,
                      x_log_backtrace IN BOOLEAN) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'log_smtp'; $END
     l_layout        t_app_appender.parameter_value%TYPE;
     l_trigger_level t_log_level.log_level%TYPE;
   BEGIN
@@ -2162,6 +2420,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                        x_message       IN message_type,
                        x_call_stack    IN BOOLEAN,
                        x_log_backtrace IN BOOLEAN) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'log_stdout'; $END
     l_layout t_app_appender.parameter_value%TYPE;
   BEGIN
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_layout',  'YES'); $END
@@ -2193,6 +2452,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                       x_message       IN message_type,
                       x_call_stack    IN BOOLEAN,
                       x_log_backtrace IN BOOLEAN) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'log_table'; $END
     PRAGMA AUTONOMOUS_TRANSACTION;
     l_backtrace        t_log.backtrace%TYPE := NULL;
     l_call_stack       t_log.call_stack%TYPE := NULL;
@@ -2239,6 +2499,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                 x_message        IN message_type,
                 x_log_backtrace  IN BOOLEAN,
                 x_log_call_stack IN BOOLEAN) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'log'; $END
   BEGIN
     IF x_logger.always_from_ctx = c_true THEN
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity',  'YES'); $END
@@ -2289,6 +2550,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                   x_message        IN message_type DEFAULT SQLERRM,
                   x_log_backtrace  IN BOOLEAN DEFAULT FALSE,
                   x_log_call_stack IN BOOLEAN DEFAULT TRUE) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'trace'; $END
   BEGIN
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('log', 'YES'); $END
     log(c_trace_level, x_logger, x_message, x_log_backtrace, x_log_call_stack);
@@ -2305,6 +2567,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                  x_message        IN message_type DEFAULT SQLERRM,
                  x_log_backtrace  IN BOOLEAN DEFAULT FALSE,
                  x_log_call_stack IN BOOLEAN DEFAULT TRUE) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'info'; $END
   BEGIN
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('log', 'YES'); $END
     log(c_info_level, x_logger, x_message, x_log_backtrace, x_log_call_stack);
@@ -2321,6 +2584,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                   x_message        IN message_type DEFAULT SQLERRM,
                   x_log_backtrace  IN BOOLEAN DEFAULT FALSE,
                   x_log_call_stack IN BOOLEAN DEFAULT TRUE) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'debug'; $END
   BEGIN
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('log', 'YES'); $END
     log(c_debug_level, x_logger, x_message, x_log_backtrace, x_log_call_stack);
@@ -2337,6 +2601,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                  x_message        IN message_type DEFAULT SQLERRM,
                  x_log_backtrace  IN BOOLEAN DEFAULT TRUE,
                  x_log_call_stack IN BOOLEAN DEFAULT TRUE) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'warn'; $END
   BEGIN
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('log', 'YES'); $END
     log(c_warn_level, x_logger, x_message, x_log_backtrace, x_log_call_stack);
@@ -2353,6 +2618,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                   x_message        IN message_type DEFAULT SQLERRM,
                   x_log_backtrace  IN BOOLEAN DEFAULT TRUE,
                   x_log_call_stack IN BOOLEAN DEFAULT TRUE) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'error'; $END
   BEGIN
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('log', 'YES'); $END
     log(c_error_level, x_logger, x_message, x_log_backtrace, x_log_call_stack);
@@ -2369,6 +2635,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                   x_message        IN message_type DEFAULT SQLERRM,
                   x_log_backtrace  IN BOOLEAN DEFAULT TRUE,
                   x_log_call_stack IN BOOLEAN DEFAULT TRUE) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'fatal'; $END
   BEGIN
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('log', 'YES'); $END
     log(c_fatal_level, x_logger, x_message, x_log_backtrace, x_log_call_stack);
@@ -2382,6 +2649,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * {*} FALSE if log level for given logger is higher than TRACE.
   */
   FUNCTION is_trace_enabled(x_logger IN OUT NOCOPY logger_type) RETURN BOOLEAN IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'is_trace_enabled'; $END
   BEGIN
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity', 'YES'); $END
     RETURN x_logger.log_level_severity <= get_level_severity(c_trace_level);
@@ -2395,6 +2663,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * {*} FALSE if log level for given logger is higher than DEBUG.
   */
   FUNCTION is_debug_enabled(x_logger IN OUT NOCOPY logger_type) RETURN BOOLEAN IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'is_trace_enabled'; $END
   BEGIN
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity', 'YES'); $END
     RETURN x_logger.log_level_severity <= get_level_severity(c_debug_level);
@@ -2408,6 +2677,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * {*} FALSE if log level for given logger is higher than INFO.
   */
   FUNCTION is_info_enabled(x_logger IN OUT NOCOPY logger_type) RETURN BOOLEAN IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'is_info_enabled'; $END
   BEGIN
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity', 'YES'); $END
     RETURN x_logger.log_level_severity <= get_level_severity(c_info_level);
@@ -2421,6 +2691,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * {*} FALSE if log level for given logger is higher than WARN.
   */
   FUNCTION is_warn_enabled(x_logger IN OUT NOCOPY logger_type) RETURN BOOLEAN IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'is_warn_enabled'; $END
   BEGIN
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity', 'YES'); $END
     RETURN x_logger.log_level_severity <= get_level_severity(c_warn_level);
@@ -2434,6 +2705,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * {*} FALSE if log level for given logger is higher than ERROR.
   */
   FUNCTION is_error_enabled(x_logger IN OUT NOCOPY logger_type) RETURN BOOLEAN IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'is_error_enabled'; $END
   BEGIN
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity', 'YES'); $END
     RETURN x_logger.log_level_severity <= get_level_severity(c_error_level);
@@ -2447,6 +2719,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * {*} FALSE if log level for given logger is higher than FATAL.
   */
   FUNCTION is_fatal_enabled(x_logger IN OUT NOCOPY logger_type) RETURN BOOLEAN IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'is_fatal_enabled'; $END
   BEGIN
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity', 'YES'); $END
     RETURN x_logger.log_level_severity <= get_level_severity(c_fatal_level);
@@ -2454,6 +2727,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
   /** Procedure purges all global contexts used by logging */
   PROCEDURE purge_global_contexts IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'purge_global_contexts'; $END
   BEGIN
     FOR l_row IN (SELECT a.base_context_name
                     FROM t_appender a) LOOP
@@ -2471,6 +2745,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
   /** Procedure purges all session contexts used by logging */
   PROCEDURE purge_session_contexts IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'purge_session_contexts'; $END
   BEGIN
     FOR l_row IN (SELECT a.base_context_name
                     FROM t_appender a) LOOP
@@ -2485,6 +2760,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
   /** Procedure copies global setting to session settings */
   PROCEDURE copy_global_to_session IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'copy_global_to_session'; $END
   BEGIN
     purge_session_contexts();
     init_params(c_session_flag);
@@ -2499,6 +2775,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   */
   PROCEDURE add_app(x_app IN t_app.app%TYPE,
                     x_app_descr IN t_app.app_desc%TYPE) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'add_app'; $END
     PRAGMA AUTONOMOUS_TRANSACTION;
   BEGIN
     
@@ -2513,6 +2790,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @param x_app Application name.
   */
   PROCEDURE remove_app(x_app IN t_app.app%TYPE) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'remove_app'; $END
     PRAGMA AUTONOMOUS_TRANSACTION;
   BEGIN
     DELETE FROM t_app_appender aa
