@@ -3,6 +3,7 @@
 @@./contexts/ctx_logger_appenders_g.sql
 @@./contexts/ctx_logger_lev_g.sql
 @@./contexts/ctx_logger_levels_g.sql
+@@./contexts/ctx_logger_modify_session_g.sql
 @@./contexts/ctx_logger_name_g.sql
 @@./contexts/ctx_logger_params_g.sql
 @@./contexts/ctx_logger_user_app_g.sql

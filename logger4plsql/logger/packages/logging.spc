@@ -36,6 +36,9 @@ CREATE OR REPLACE PACKAGE logging IS
   /** Subtype for context aribute value. */
   SUBTYPE ctx_value_type IS global_context.VALUE%TYPE;
 
+  /** Type for serialized logging settings. */
+  SUBTYPE serialized_settings_type IS ctx_value_type;
+
   /** Type for logger name hash. */
   SUBTYPE hash_type IS NUMBER; -- dbms_utility.get_hash_value;
 
@@ -167,8 +170,11 @@ CREATE OR REPLACE PACKAGE logging IS
     PROCEDURE init_appenders(x_visibility IN visibility_type DEFAULT c_global_flag);
     PROCEDURE init_email_cyclic_buffer(x_app IN VARCHAR2);
     PROCEDURE init_levels;
-    PROCEDURE init_loggers(x_visibility IN visibility_type DEFAULT c_global_flag);
-    PROCEDURE init_params(x_visibility IN visibility_type DEFAULT c_global_flag);
+    PROCEDURE init_loggers(x_visibility IN visibility_type DEFAULT c_global_flag,
+                           x_app        IN t_app.app%TYPE DEFAULT NULL);
+    PROCEDURE init_params(x_visibility IN visibility_type DEFAULT c_global_flag,
+                          x_app        IN t_param.app%%TYPE DEFAULT NULL);
+    PROCEDURE init_session_identifier;
     PROCEDURE init_user_app;
     FUNCTION int_to_bool(x_number IN NUMBER) RETURN BOOLEAN;
     FUNCTION is_cyclic_buffer_empty RETURN BOOLEAN;
@@ -205,6 +211,7 @@ CREATE OR REPLACE PACKAGE logging IS
                                     x_value          IN ctx_value_type);
     PROCEDURE send_buffer(x_app IN t_app_appender.app%TYPE);
     PROCEDURE unimplemented;
+    PROCEDURE use_requested_session_settings(x_app IN t_app.app%TYPE);
     PROCEDURE set_context(x_namespace IN ctx_namespace_type,
                           x_attribute IN ctx_attribute_type,
                           x_value     IN ctx_value_type);
@@ -568,8 +575,10 @@ CREATE OR REPLACE PACKAGE logging IS
   /** Procedure purges all session contexts used by logging */
   PROCEDURE purge_session_contexts;
 
-  /** Procedure copies global setting to session settings */
-  PROCEDURE copy_global_to_session;
+  /** Procedure copies global setting to session settings.
+  * @param x_app Application name. If set, copying will be done only for the given application.
+  */
+  PROCEDURE copy_global_to_session(x_app IN t_app.app%TYPE DEFAULT NULL);
 
   /**
   * Procedure adds an application to the configuration.
@@ -584,6 +593,16 @@ CREATE OR REPLACE PACKAGE logging IS
   * @param x_app Application name.
   */
   PROCEDURE remove_app(x_app IN t_app.app%TYPE);
+
+  /**
+  * Procedure enables custom settings for given session.
+  * @param x_instance Id of instance for the session (e.g. from gv$session.inst_id).
+  * @param x_sessionid Audit session identifier (from gv$session.audsid)
+  * @param x_settings Serialized settings to be applied.
+  */
+  PROCEDURE set_settings_for_session(x_instance  IN PLS_INTEGER,
+                                     x_sessionid IN NUMBER,
+                                     x_settings  IN serialized_settings_type);
 
   /**
   * Procedure sets given attribute of given context to given value.

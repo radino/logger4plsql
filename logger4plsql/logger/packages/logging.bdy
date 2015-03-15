@@ -49,6 +49,14 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     buffer    mail_table_type -- buffer containg logs
     );
 
+  /** Identifier for the session which consists of two componets:
+  * {*} instance number  Retrieved from sys_context('userenv', 'instance')
+  * {*} session_id       Retrieved from sys_context('userenv', 'sessionid')
+  * session_id has been chosen, bacause sid is recycled and serial# is not held in userenv context
+  * The implication is: Feature for setting context for a given session cannot be used for SYSDBA accounts.
+  */
+  g_session_identifier global_context.attribute%TYPE;
+
   /** SMTP appender: Cyclic buffer global variable. */
   g_mail_buffer mail_cyclic_buffer_type;
   
@@ -91,6 +99,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
   /** Name of global context containing severities for log levels. */
   c_global_levels_ctx CONSTANT ctx_namespace_type := 'CTX_LOGGER_LEVELS_G';
+
+  /** Name of global context containing settings for a session. */
+  c_modify_session_ctx CONSTANT ctx_namespace_type := 'CTX_LOGGER_MODIFY_SESSION_G';
 
   /** Names of global and session contexts containing logger names. */
   c_logger_names_ctx CONSTANT context_list_type := context_list_type('CTX_LOGGER_NAME_G', 'CTX_LOGGER_NAME_L');
@@ -815,11 +826,17 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @param x_visibility Flag, whether global or session contexts should be initialized.
   * {*} c_global_flag  Initialize global contexts
   * {*} c_session_flag Initialize session contexts
+  * @param x_app Application. Useful for the session context initialization. If set,
+  *              only context for given application is initialized.
   */
-  PROCEDURE init_params(x_visibility IN visibility_type DEFAULT c_global_flag) IS
+  PROCEDURE init_params(x_visibility IN visibility_type DEFAULT c_global_flag,
+                        x_app        IN t_param.app%TYPE DEFAULT NULL) IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'init_params'; $END
   BEGIN
-    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'x_visibility: ' || x_visibility); $END
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_visibility: ' || x_visibility); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
+    $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('is_initialized',  'YES'); $END
     IF is_initialized(c_parameters_ctx(x_visibility)) THEN
       $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Context already initialized'); $END
@@ -827,7 +844,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     END IF;
 
     FOR l_row IN (SELECT p.app, p.param_name, p.param_value
-                    FROM t_param p) LOOP
+                    FROM t_param p
+                   WHERE p.app = x_app OR x_app IS NULL) LOOP
 
       $IF $$debug $THEN 
         internal_log(logging.c_trace_level, l_intlogger, 'c_parameters_ctx(x_visibility): ' || c_parameters_ctx(x_visibility)); 
@@ -856,12 +874,18 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * @param x_visibility Flag, whether global or session contexts should be initialized.
   * {*} c_global_flag  Initialize global contexts
   * {*} c_session_flag Initialize session contexts
+  * @param x_app Application. Useful for the session context initialization. If set,
+  *              only context for given application is initialized.
   */
-  PROCEDURE init_loggers(x_visibility IN visibility_type DEFAULT c_global_flag) IS
+  PROCEDURE init_loggers(x_visibility IN visibility_type DEFAULT c_global_flag,
+                         x_app        IN t_app.app%TYPE DEFAULT NULL) IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'init_loggers'; $END
     l_hlogger hash_type;
   BEGIN
-    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'x_visibility: ' || x_visibility); $END
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_visibility: ' || x_visibility); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
+    $END
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('is_initialized',  'YES'); $END
     IF is_initialized(c_logger_names_ctx(x_visibility)) THEN
@@ -870,7 +894,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     END IF;
 
     FOR l_row IN (SELECT l.logger, l.log_level, l.appenders, l.additivity
-                    FROM t_logger l) LOOP
+                    FROM t_logger l
+                   WHERE l.logger LIKE x_app || '.%' OR x_app IS NULL) LOOP
 
       $IF $$debug $THEN 
         internal_log(logging.c_trace_level, l_intlogger, 'c_logger_names_ctx(x_visibility): ' || c_logger_names_ctx(x_visibility)); 
@@ -896,6 +921,16 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_initialization',  'YES'); $END
     set_initialization(c_logger_names_ctx(x_visibility), TRUE, x_visibility);
   END init_loggers;
+
+  /**
+  * Procedure initializes g_session_identified.
+  */  
+  PROCEDURE init_session_identifier IS 
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'init_session_identifier'; $END
+  BEGIN
+    g_session_identifier := sys_context('userenv', 'instance') || '#' || sys_context('userenv', 'sessionid');
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'g_session_identifier: ' || g_session_identifier); $END
+  END init_session_identifier; 
 
   /**
   * Procedure initializes a global context schema-application mapping.
@@ -1740,6 +1775,32 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   END set_session_parameter;
 
   /**
+  * Procedure applies requested session settings for current session and given application.
+  * @param x_app Application.
+  */
+  PROCEDURE use_requested_session_settings(x_app IN t_app.app%TYPE) IS 
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'use_requested_session_settings'; $END
+    l_settings serialized_settings_type;
+  BEGIN
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); $END
+    l_settings := sys_context(c_modify_session_ctx,  g_session_identifier);
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_settings: ' || l_settings); $END
+    IF l_settings IS NULL THEN
+      $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'No session settings requested'); $END
+      RETURN;
+    END IF;
+    
+    $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Session settings requested, applying...'); $END
+    -- if there have been some settings requested, apply them to current session
+    IF l_settings IS NOT NULL THEN
+      copy_global_to_session(x_app => x_app);
+      --TODO: apply settings
+      set_session_ctx_usage(x_usage => true);
+    END IF;      
+
+  END use_requested_session_settings;
+
+  /**
   * Function obtains current parameter value for given app and parameter name.
   * @param x_app Application.
   * @param x_param_name Parameter name.
@@ -2545,6 +2606,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $END
 
     IF x_logger.always_from_ctx = c_true THEN
+      -- check whether custom session settings has been requested, if yes, use them
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('use_requested_session_settings',  'YES'); $END
+      use_requested_session_settings(x_logger.app);      
+  
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity',  'YES'); $END
       x_logger.log_level_severity := get_level_severity(get_current_used_level(x_logger.logger));
       $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level_severity); $END
@@ -2703,6 +2768,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $END
 
     IF x_logger.always_from_ctx = c_true THEN
+      -- check whether custom session settings has been requested, if yes, use them
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('use_requested_session_settings',  'YES'); $END
+      use_requested_session_settings(x_logger.app);      
+      
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity', 'YES'); $END
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_level', 'YES'); $END
       x_logger.log_level_severity := get_level_severity(get_current_used_level(x_logger.logger));
@@ -2730,6 +2799,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $END
 
     IF x_logger.always_from_ctx = c_true THEN
+      -- check whether custom session settings has been requested, if yes, use them
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('use_requested_session_settings',  'YES'); $END
+      use_requested_session_settings(x_logger.app);      
+
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity', 'YES'); $END
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_level', 'YES'); $END
       x_logger.log_level_severity := get_level_severity(get_current_used_level(x_logger.logger));
@@ -2758,6 +2831,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $END
 
     IF x_logger.always_from_ctx = c_true THEN
+      -- check whether custom session settings has been requested, if yes, use them
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('use_requested_session_settings',  'YES'); $END
+      use_requested_session_settings(x_logger.app);      
+      
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity', 'YES'); $END
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_level', 'YES'); $END
       x_logger.log_level_severity := get_level_severity(get_current_used_level(x_logger.logger));
@@ -2787,6 +2864,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $END
 
     IF x_logger.always_from_ctx = c_true THEN
+      -- check whether custom session settings has been requested, if yes, use them
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('use_requested_session_settings',  'YES'); $END
+      use_requested_session_settings(x_logger.app);      
+
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity', 'YES'); $END
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_level', 'YES'); $END
       x_logger.log_level_severity := get_level_severity(get_current_used_level(x_logger.logger));
@@ -2816,6 +2897,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $END
 
     IF x_logger.always_from_ctx = c_true THEN
+      -- check whether custom session settings has been requested, if yes, use them
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('use_requested_session_settings',  'YES'); $END
+      use_requested_session_settings(x_logger.app);      
+
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity', 'YES'); $END
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_level', 'YES'); $END
       x_logger.log_level_severity := get_level_severity(get_current_used_level(x_logger.logger));
@@ -2845,6 +2930,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $END
 
     IF x_logger.always_from_ctx = c_true THEN
+      -- check whether custom session settings has been requested, if yes, use them
+      $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('use_requested_session_settings',  'YES'); $END
+      use_requested_session_settings(x_logger.app);      
+      
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity', 'YES'); $END
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_used_level', 'YES'); $END
       x_logger.log_level_severity := get_level_severity(get_current_used_level(x_logger.logger));
@@ -2892,17 +2981,42 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'end'); $END
   END purge_session_contexts;
 
-  /** Procedure copies global setting to session settings */
-  PROCEDURE copy_global_to_session IS
+  /** Procedure copies global setting to session settings.
+  * @param x_ap p Application name. If set, copying will be done only for the given application.
+  */
+  PROCEDURE copy_global_to_session(x_app IN t_app.app%TYPE) IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'copy_global_to_session'; $END
   BEGIN
-    $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'copying global context to session context'); $END
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_app' || x_app); 
+      internal_log(logging.c_info_level, l_intlogger, 'copying global context to session context'); 
+    $END
     purge_session_contexts();
-    init_params(c_session_flag);
+    init_params(c_session_flag, x_app);
     init_appenders(c_session_flag);
-    init_loggers(c_session_flag);
+    init_loggers(c_session_flag, x_app);
     $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'end'); $END
   END copy_global_to_session;
+  
+  /**
+  * Procedure enables custom settings for given session.
+  * @param x_instance Id of instance for the session (e.g. from gv$session.inst_id).
+  * @param x_sessionid Audit session identifier (from gv$session.audsid)
+  * @param x_settings Serialized settings to be applied.
+  */
+  PROCEDURE set_settings_for_session(x_instance  IN PLS_INTEGER,
+                                     x_sessionid IN NUMBER,
+                                     x_settings  IN serialized_settings_type) IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_settings_for_session'; $END
+  BEGIN
+    $IF $$debug $THEN 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_instance: ' || x_instance);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_sessionid: ' || x_sessionid);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_settings: ' || x_settings);
+    $END
+
+    set_context_rac_aware(c_modify_session_ctx, x_instance || '#' || x_sessionid, x_settings, c_global_flag);
+  END set_settings_for_session;
 
   /**
   * Procedure adds an application to the configuration.
@@ -2983,6 +3097,8 @@ BEGIN
     init_log_level_severities();
   $END
   
+  $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('init_session_identifier', 'YES'); $END
+  init_session_identifier();  
   $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name', 'YES'); $END
   g_root_logger_hash := hash_logger_name(c_root_logger_name);
   $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('init_user_app', 'YES'); $END
