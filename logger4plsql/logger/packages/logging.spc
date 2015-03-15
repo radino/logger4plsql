@@ -36,9 +36,6 @@ CREATE OR REPLACE PACKAGE logging IS
   /** Subtype for context aribute value. */
   SUBTYPE ctx_value_type IS global_context.VALUE%TYPE;
 
-  /** Type for serialized logging settings. */
-  SUBTYPE serialized_settings_type IS ctx_value_type;
-
   /** Type for logger name hash. */
   SUBTYPE hash_type IS NUMBER; -- dbms_utility.get_hash_value;
 
@@ -73,6 +70,23 @@ CREATE OR REPLACE PACKAGE logging IS
     enabled_appenders  t_logger.appenders%TYPE,
     app                t_app_appender.app%TYPE,
     appenders_params   appenders_params_type -- currently not used
+  );
+  
+  /** Type used for serialization of loggers parameters */
+  TYPE logger_settings_type IS RECORD (
+     enabled_appenders  t_logger.appenders%TYPE,
+     log_level          t_logger.log_level%TYPE,
+     additivity         t_logger.additivity%TYPE       
+  );
+  
+  /** Collection type of loggers used for serialization of loggers parameters */
+  TYPE logger_settings_col_type IS TABLE OF logger_settings_type INDEX BY t_logger.logger%TYPE;
+  
+  /** Type for serialized logging settings. */
+  TYPE serialized_settings_type IS RECORD (
+     loggers          logger_settings_col_type,
+     app_params       appender_params_type,
+     appenders_params appenders_params_type
   );
 
   /** Log level ALL. */
@@ -206,6 +220,7 @@ CREATE OR REPLACE PACKAGE logging IS
                           o_app        OUT VARCHAR2,
                           x_method     IN VARCHAR2 DEFAULT NULL,
                           x_call_stack IN VARCHAR2 DEFAULT dbms_utility.format_call_stack());
+    FUNCTION serialize_settings RETURN ctx_value_type;7
     PROCEDURE set_context_rac_aware(x_namespace      IN ctx_namespace_type,
                                     x_attribute      IN ctx_attribute_type,
                                     x_value          IN ctx_value_type);
@@ -594,15 +609,82 @@ CREATE OR REPLACE PACKAGE logging IS
   */
   PROCEDURE remove_app(x_app IN t_app.app%TYPE);
 
+  /** Procedure shows serialized settings. */
+  PROCEDURE show_serialized_settings;
+
+  /**
+  * Procedure adds given appender to given logger and sets additivity flag for the logger in serialized settings.
+  * @param x_logger_name Logger name.
+  * @param x_appender Binary coded appender.
+  * @param x_additivity Additivity flag.
+  */
+  PROCEDURE add_serialized_appender(x_logger_name IN t_logger.logger%TYPE,
+                                    x_appender    IN t_appender.appender%TYPE,
+                                    x_additivity  IN BOOLEAN DEFAULT TRUE);
+                                    
+  /**
+  * Procedure removes given appender from given logger in serialized settings.
+  * @param x_logger_name Logger name.
+  * @param x_appender Binary coded appender.
+  */
+  PROCEDURE remove_serialized_appender(x_logger_name IN t_logger.logger%TYPE,
+                                       x_appender    IN t_appender.appender%TYPE);
+                                       
+  /**
+  * Procedure sets additivity flag for given logger in serialized settings.
+  * @param x_logger_name Loger name.
+  * @param x_additivity Additivity flag.
+  */
+  PROCEDURE set_serialized_additivity(x_logger_name IN t_logger.logger%TYPE,
+                                      x_additivity  IN BOOLEAN);
+                                      
+  /**
+  * Procedure sets session value for given parameter name, appender and application.
+  * @param x_app Application name.
+  * @param x_appender Appender name.
+  * @param x_parameter_name Parameter name.
+  * @param x_parameter_value Parameter value.
+  */
+  PROCEDURE set_serialized_appender_param(x_app             IN t_app_appender.app%TYPE,
+                                          x_appender        IN t_app_appender.appender%TYPE,
+                                          x_parameter_name  IN t_app_appender.parameter_name%TYPE,
+                                          x_parameter_value IN t_app_appender.parameter_value%TYPE);
+                                          
+  /**
+  * Procedure sets session layout for given appender and given application.
+  * @param x_app Application name.
+  * @param x_appender Appender name.
+  * @param x_layout Layout.
+  */
+  PROCEDURE set_serialized_layout(x_app      IN t_app_appender.app%TYPE,
+                                  x_appender IN t_app_appender.appender%TYPE,
+                                  x_layout   IN t_app_appender.parameter_value%TYPE);
+                                  
+   /**
+  * Procedure sets session log level for given logger.
+  * @param x_logger Logger name.
+  * @param x_log_level Log level.
+  */
+  PROCEDURE set_serialized_level(x_logger_name IN t_logger.logger%TYPE,
+                                 x_log_level   IN t_logger.log_level%TYPE);
+
+  /**
+  * Procedure sets session parameter value for given app and parameter name.
+  * @param x_app Application.
+  * @param x_param_name Parameter name.
+  * @param x_param_value Parameter value.
+  */
+  PROCEDURE set_serialized_parameter(x_app         IN t_param.app%TYPE,
+                                     x_param_name  IN t_param.param_name%TYPE,
+                                     x_param_value IN t_param.param_value%TYPE);
+
   /**
   * Procedure enables custom settings for given session.
   * @param x_instance Id of instance for the session (e.g. from gv$session.inst_id).
   * @param x_sessionid Audit session identifier (from gv$session.audsid)
-  * @param x_settings Serialized settings to be applied.
   */
-  PROCEDURE set_settings_for_session(x_instance  IN PLS_INTEGER,
-                                     x_sessionid IN NUMBER,
-                                     x_settings  IN serialized_settings_type);
+  PROCEDURE apply_settings_for_session(x_instance  IN PLS_INTEGER,
+                                       x_sessionid IN NUMBER);
 
   /**
   * Procedure sets given attribute of given context to given value.
