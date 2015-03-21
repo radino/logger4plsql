@@ -2,7 +2,7 @@ create table t_logger
 (
   logger     varchar2(255) not null,
   log_level  varchar2(32),
-  appenders  number(38) default 0 not null,
+  appenders  number(10) default 0 not null,
   additivity number(1) default 1 not null,
   constraint pk_logger primary key (logger)
 )

@@ -125,7 +125,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   c_parameters_ctx CONSTANT context_list_type := context_list_type('CTX_LOGGER_PARAMS_G',
                                                                    'CTX_LOGGER_PARAMS_L');
 
-  /** Name of global context containing appenders' codes. */
+  /** Name of global context containing appenders' base context name. */
   c_global_appenders_ctx CONSTANT ctx_namespace_type := 'CTX_LOGGER_APPENDERS_G';
 
   /** Suffixes of appenders context names regarding to visibility. */
@@ -865,7 +865,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_ctx_suffix := CASE x_visibility WHEN c_global_flag THEN '_G' ELSE '_L' END;
     $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_ctx_suffix: ' || l_ctx_suffix); $END
 
-    FOR l_row IN (SELECT a.appender, a.code, a.base_context_name
+    FOR l_row IN (SELECT a.code, a.base_context_name
                     FROM t_appender a) LOOP
 
       l_current_appender_ctx := l_row.base_context_name || l_ctx_suffix;
@@ -873,14 +873,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
       -- there is no session context for appenders
       IF x_visibility = c_global_flag THEN
-        set_context_rac_aware(c_global_appenders_ctx, l_row.appender, l_row.base_context_name, c_global_flag);
+        set_context_rac_aware(c_global_appenders_ctx, l_row.code, l_row.base_context_name, c_global_flag);
       END IF;      
-      
-      set_context_rac_aware(l_current_appender_ctx, 'DEFAULT#CODE', l_row.code, x_visibility);
 
       FOR l_row2 IN (SELECT aa.app, aa.parameter_name, aa.parameter_value
                        FROM t_app_appender aa
-                      WHERE aa.appender = l_row.appender) LOOP
+                      WHERE aa.appender_code = l_row.code) LOOP
         $IF $$debug $THEN 
           internal_log(logging.c_trace_level, l_intlogger, 'l_current_appender_ctx: ' || l_current_appender_ctx); 
           internal_log(logging.c_trace_level, l_intlogger, 'app#parameter_name: ' || l_row2.app || '#' || l_row2.parameter_name); 
@@ -1091,11 +1089,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   /**
   * Procedure sets global layout for given appender and given application.
   * @param x_app Application name.
-  * @param x_appender Appender name.
+  * @param x_appender_code Appender code.
   * @param x_layout Layout.
   */
   PROCEDURE set_global_layout(x_app      IN t_app_appender.app%TYPE,
-                              x_appender IN t_app_appender.appender%TYPE,
+                              x_appender_code IN t_app_appender.appender_code%TYPE,
                               x_layout   IN t_app_appender.parameter_value%TYPE) IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_global_layout'; $END
     PRAGMA AUTONOMOUS_TRANSACTION;
@@ -1103,13 +1101,13 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF $$debug $THEN 
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_layout: ' || x_layout); 
     $END
     
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_global_appender_param',  'YES'); $END
     set_global_appender_param(x_app             => x_app,
-                              x_appender        => x_appender,
+                              x_appender_code   => x_appender_code,
                               x_parameter_name  => c_layout_param,
                               x_parameter_value => x_layout);
     $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'end'); $END
@@ -1118,24 +1116,24 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   /**
   * Procedure sets session layout for given appender and given application.
   * @param x_app Application name.
-  * @param x_appender Appender name.
+  * @param x_appender_code Appender code.
   * @param x_layout Layout.
   */
-  PROCEDURE set_session_layout(x_app      IN t_app_appender.app%TYPE,
-                               x_appender IN t_app_appender.appender%TYPE,
-                               x_layout   IN t_app_appender.parameter_value%TYPE) IS
+  PROCEDURE set_session_layout(x_app           IN t_app_appender.app%TYPE,
+                               x_appender_code IN t_app_appender.appender_code%TYPE,
+                               x_layout        IN t_app_appender.parameter_value%TYPE) IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_session_layout'; $END
   BEGIN
     $IF $$debug $THEN
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_layout: ' || x_layout); 
     $END
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_session_appender_param','YES'); $END
     set_session_appender_param(x_app             => x_app,
-                               x_appender        => x_appender,
+                               x_appender_code   => x_appender_code,
                                x_parameter_name  => c_layout_param,
                                x_parameter_value => x_layout);
     $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'end'); $END
@@ -1144,12 +1142,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   /**
   * Procedure sets global value for given parameter name, appender and application.
   * @param x_app Application name.
-  * @param x_appender Appender name.
+  * @param x_appender_code Appender code.
   * @param x_parameter_name Parameter name.
   * @param x_parameter_value Parameter value.
   */
   PROCEDURE set_global_appender_param(x_app             IN t_app_appender.app%TYPE,
-                                      x_appender        IN t_app_appender.appender%TYPE,
+                                      x_appender_code   IN t_app_appender.appender_code%TYPE,
                                       x_parameter_name  IN t_app_appender.parameter_name%TYPE,
                                       x_parameter_value IN t_app_appender.parameter_value%TYPE) IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_global_appender_param'; $END
@@ -1158,7 +1156,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF $$debug $THEN
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_parameter_name: ' || x_parameter_name); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_parameter_value: ' || x_parameter_value); 
     $END
@@ -1167,17 +1165,17 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     MERGE INTO t_app_appender aa
     USING (SELECT NULL
              FROM dual) dummy
-    ON (aa.app = x_app AND aa.appender = x_appender AND aa.parameter_name = x_parameter_name)
+    ON (aa.app = x_app AND aa.appender_code = x_appender_code AND aa.parameter_name = x_parameter_name)
     WHEN MATCHED THEN
       UPDATE
          SET aa.parameter_value = x_parameter_value
     WHEN NOT MATCHED THEN
       INSERT
-        (app, appender, parameter_name, parameter_value)
+        (app, appender_code, parameter_name, parameter_value)
       VALUES
-        (x_app, x_appender, x_parameter_name, x_parameter_value);
+        (x_app, x_appender_code, x_parameter_name, x_parameter_value);
     
-    set_context_rac_aware(sys_context(c_global_appenders_ctx, x_appender) || '_G',
+    set_context_rac_aware(sys_context(c_global_appenders_ctx, x_appender_code) || '_G',
                           x_app || '#' || x_parameter_name,
                           x_parameter_value,
                           c_global_flag);
@@ -1189,12 +1187,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   /**
   * Procedure sets session value for given parameter name, appender and application.
   * @param x_app Application name.
-  * @param x_appender Appender name.
+  * @param x_appender_code Appender code.
   * @param x_parameter_name Parameter name.
   * @param x_parameter_value Parameter value.
   */
   PROCEDURE set_session_appender_param(x_app             IN t_app_appender.app%TYPE,
-                                       x_appender        IN t_app_appender.appender%TYPE,
+                                       x_appender_code   IN t_app_appender.appender_code%TYPE,
                                        x_parameter_name  IN t_app_appender.parameter_name%TYPE,
                                        x_parameter_value IN t_app_appender.parameter_value%TYPE) IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_session_appender_param'; $END
@@ -1202,12 +1200,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF $$debug $THEN
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_parameter_name: ' || x_parameter_name); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_parameter_value: ' || x_parameter_value); 
     $END
 
-    set_context_rac_aware(sys_context(c_global_appenders_ctx, x_appender) || '_L',
+    set_context_rac_aware(sys_context(c_global_appenders_ctx, x_appender_code) || '_L',
                           x_app || '#' || x_parameter_name,
                           x_parameter_value,
                           c_session_flag);
@@ -1232,39 +1230,18 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   END get_session_ctx_usage;
 
   /**
-  * Function returns appender code for given appender name.
-  * @param x_appender Appender name.
-  * @return Appender code.
-  */
-  FUNCTION get_appender_code(x_appender IN t_appender.appender%TYPE) RETURN t_appender.code%TYPE IS
-    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'get_appender_code'; $END
-    l_result t_appender.code%TYPE;
-  BEGIN
-    $IF $$debug $THEN
-      internal_log(logging.c_info_level, l_intlogger, 'start');
-      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
-    $END
-    l_result := sys_context(sys_context(c_global_appenders_ctx, x_appender) || '_G', 'DEFAULT#CODE');
-    $IF $$debug $THEN 
-      internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result);
-      internal_log(logging.c_info_level, l_intlogger, 'end');
-    $END
-    RETURN l_result;
-  END get_appender_code;
-
-  /**
   * Function returns global or session layout for given application, appender and visibility.
   * If layout is not set, default layout is returned.
   * @param x_app Application name.
-  * @param x_appender Appender name.
+  * @param x_appender_code Appender code.
   * @param x_visibility Global or session visibility  
   * @return 
   *   {*} Global layout for given application and appender, if visibility is c_global_flag
   *   {*} Session layout for given application and appender, if visibility is c_session_flag
   */
-  FUNCTION get_layout(x_app        IN t_app_appender.app%TYPE,
-                      x_appender   IN t_app_appender.appender%TYPE,
-                      x_visibility IN visibility_type DEFAULT c_global_flag)
+  FUNCTION get_layout(x_app           IN t_app_appender.app%TYPE,
+                      x_appender_code IN t_app_appender.appender_code%TYPE,
+                      x_visibility    IN visibility_type DEFAULT c_global_flag)
     RETURN t_app_appender.parameter_value%TYPE IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'get_layout'; $END
     l_result t_app_appender.parameter_value%TYPE;
@@ -1272,10 +1249,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF $$debug $THEN 
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_visibility: ' || x_visibility); 
     $END
-    l_result := coalesce(sys_context(sys_context(c_global_appenders_ctx, x_appender) || c_append_vis_suffix(x_visibility), x_app || '#LAYOUT'),
+    l_result := coalesce(sys_context(sys_context(c_global_appenders_ctx, x_appender_code) || c_append_vis_suffix(x_visibility), x_app || '#LAYOUT'),
                          sys_context(c_parameters_ctx(c_global_flag), c_default_layout_param));
     $IF $$debug $THEN 
       internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result); 
@@ -1287,7 +1264,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   /**
   * Function returns global or session parameter value for given application, appender, parameter and visibility.
   * @param x_app Application name.
-  * @param x_appender Appender name.
+  * @param x_appender_code Appender code.
   * @param x_parameter_name Parameter name.
   * @param x_visibility Global or session visibility  
   * @return Global or session parameter value for given application, appender and parameter.
@@ -1295,7 +1272,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   *   {*} Session parameter value for given application, appender and parameter, if visibility is c_session_flag
   */
   FUNCTION get_appender_param(x_app            IN t_app_appender.app%TYPE,
-                              x_appender       IN t_app_appender.appender%TYPE,
+                              x_appender_code  IN t_app_appender.appender_code%TYPE,
                               x_parameter_name IN t_app_appender.parameter_name%TYPE,
                               x_visibility     IN visibility_type DEFAULT c_global_flag)
     RETURN t_app_appender.parameter_value%TYPE IS
@@ -1305,11 +1282,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF $$debug $THEN
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_parameter_name: ' || x_parameter_name); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_visibility: ' || x_visibility);
     $END
-    l_result := sys_context(sys_context(c_global_appenders_ctx, x_appender) || c_append_vis_suffix(x_visibility),
+    l_result := sys_context(sys_context(c_global_appenders_ctx, x_appender_code) || c_append_vis_suffix(x_visibility),
                             x_app || '#' || x_parameter_name);
     $IF $$debug $THEN 
       internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result); 
@@ -1322,12 +1299,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * Function returns current (global or session based on get_session_ctx_usage) parameter
   * value for given application, appender and parameter.
   * @param x_app Application name.
-  * @param x_appender Appender name.
+  * @param x_appender_code Appender code.
   * @param x_parameter_name Parameter name.
   * @return Current parameter value for given application, appender and parameter.
   */
   FUNCTION get_current_appender_param(x_app            IN t_app_appender.app%TYPE,
-                                      x_appender       IN t_app_appender.appender%TYPE,
+                                      x_appender_code  IN t_app_appender.appender_code%TYPE,
                                       x_parameter_name IN t_app_appender.parameter_name%TYPE)
     RETURN t_app_appender.parameter_value%TYPE IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'get_current_appender_param'; $END
@@ -1336,17 +1313,17 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF $$debug $THEN
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_parameter_name: ' || x_parameter_name); 
     $END
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_session_ctx_usage',  'YES'); $END
     IF get_session_ctx_usage() THEN
       $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'session context'); $END
-      l_result := get_appender_param(x_app, x_appender, x_parameter_name, c_session_flag);
+      l_result := get_appender_param(x_app, x_appender_code, x_parameter_name, c_session_flag);
     ELSE
       $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'global context'); $END
-      l_result := get_appender_param(x_app, x_appender, x_parameter_name, c_global_flag);
+      l_result := get_appender_param(x_app, x_appender_code, x_parameter_name, c_global_flag);
     END IF;
     
     $IF $$debug $THEN 
@@ -1360,11 +1337,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   * Function returns current (global or session based on get_session_ctx_usage) layout
   * for given application and appender.
   * @param x_app Application name.
-  * @param x_appender Appender name.
+  * @param x_appender_code Appender code.
   * @return Current layout for given application and appender.
   */
-  FUNCTION get_current_layout(x_app      IN t_app_appender.app%TYPE,
-                              x_appender IN t_app_appender.appender%TYPE)
+  FUNCTION get_current_layout(x_app           IN t_app_appender.app%TYPE,
+                              x_appender_code IN t_app_appender.appender_code%TYPE)
     RETURN t_app_appender.parameter_value%TYPE IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'get_current_layout'; $END
     l_result t_app_appender.parameter_value%TYPE;
@@ -1372,18 +1349,18 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF $$debug $THEN
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code); 
     $END
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_session_ctx_usage',  'YES'); $END
     IF get_session_ctx_usage() THEN
       $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'session context'); $END
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_layout',  'YES'); $END
-      l_result := get_layout(x_app, x_appender, c_session_flag);
+      l_result := get_layout(x_app, x_appender_code, c_session_flag);
     ELSE 
       $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'global context'); $END
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_layout',  'YES'); $END
-      l_result := get_layout(x_app, x_appender, c_global_flag);
+      l_result := get_layout(x_app, x_appender_code, c_global_flag);
     END IF;
     
     $IF $$debug $THEN 
@@ -1588,16 +1565,16 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   /**
   * Procedure adds given global appenders to given logger and sets global additivity flag for the logger.
   * @param x_logger Logger name.
-  * @param x_appender Binary coded Appender list.
+  * @param x_appender_code Appender code.
   * @param x_additivity Additivity flag.
   */
-  PROCEDURE add_global_appender(x_logger_name IN t_logger.logger%TYPE,
-                                x_appender    IN t_appender.appender%TYPE,
-                                x_additivity  IN BOOLEAN DEFAULT TRUE) IS
+  PROCEDURE add_global_appender(x_logger_name   IN t_logger.logger%TYPE,
+                                x_appender_code IN t_appender.code%TYPE,
+                                x_additivity    IN BOOLEAN DEFAULT TRUE) IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'add_global_appender'; $END
     PRAGMA AUTONOMOUS_TRANSACTION;
     l_app        t_schema_app.app%TYPE;
-    l_code       t_appender.code%TYPE;
+    l_dummy      VARCHAR2(1);
     l_appenders  t_logger.appenders%TYPE;
     l_hlogger    hash_type;
     l_additivity t_logger.additivity%TYPE;
@@ -1605,7 +1582,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF $$debug $THEN 
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_additivity: ' || bool_to_int(x_additivity)); 
     $END
 
@@ -1619,11 +1596,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     END IF;
 
     BEGIN
-      SELECT a.code
-        INTO l_code
+      SELECT NULL
+        INTO l_dummy
         FROM t_appender a
-       WHERE a.appender = x_appender;
-      $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_code: ' || l_code); $END
+       WHERE a.code = x_appender_code;
     EXCEPTION
       WHEN no_data_found THEN
         $IF $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'No such appender'); $END
@@ -1635,12 +1611,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_additivity: ' || l_additivity); $END
                 
     UPDATE t_logger l
-       SET l.appenders = bit_or(l.appenders, l_code), l.additivity = l_additivity
+       SET l.appenders = bit_or(l.appenders, x_appender_code), l.additivity = l_additivity
      WHERE l.logger = x_logger_name
     RETURNING appenders INTO l_appenders;
 
     IF SQL%NOTFOUND THEN
-      l_appenders := l_code;
+      l_appenders := x_appender_code;
       $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Inserting a new row'); $END
       INSERT INTO t_logger
         (logger, appenders, additivity)
@@ -1743,21 +1719,21 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   /**
   * Procedure removes givne global appenders from given logger.
   * @param x_logger_name Logger name.
-  * @param x_appender Binary coded Appender list.
+  * @param x_appender_code Appender code.
   */
-  PROCEDURE remove_global_appender(x_logger_name IN t_logger.logger%TYPE,
-                                   x_appender    IN t_appender.appender%TYPE) IS
+  PROCEDURE remove_global_appender(x_logger_name   IN t_logger.logger%TYPE,
+                                   x_appender_code IN t_appender.code%TYPE) IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'remove_global_appender'; $END
     PRAGMA AUTONOMOUS_TRANSACTION;
     l_app       t_schema_app.app%TYPE;
-    l_code      t_appender.code%TYPE;
+    l_dummy     VARCHAR2(1);
     l_appenders t_logger.appenders%TYPE;
     l_hlogger   hash_type;
   BEGIN
     $IF $$debug $THEN
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code); 
     $END    
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_app',  'YES'); $END
@@ -1769,10 +1745,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     END IF;
 
     BEGIN
-      SELECT a.code
-        INTO l_code
+      SELECT NULL
+        INTO l_dummy
         FROM t_appender a
-       WHERE a.appender = x_appender;
+       WHERE a.code = x_appender_code;
     EXCEPTION
       WHEN no_data_found THEN
         $IF $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'Appender not found'); $END
@@ -1781,9 +1757,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
     -- unset appenders
     UPDATE t_logger l
-       SET l.appenders = bit_xor(l.appenders, l_code)
+       SET l.appenders = bit_xor(l.appenders, x_appender_code)
      WHERE l.logger = x_logger_name
-       AND bitand(l.appenders, l_code) > 0
+       AND bitand(l.appenders, x_appender_code) > 0
     RETURNING appenders INTO l_appenders;
 
     -- an appender with given code was set for given logger
@@ -1806,29 +1782,29 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   /**
   * Procedure adds given session (session) appenders to given logger and sets session additivity flag for the logger.
   * @param x_logger_name Logger name.
-  * @param x_appender Binary coded Appender list.
+  * @param x_appender_code Appender code.
   * @param x_additivity Additivity flag.
   */
-  PROCEDURE add_session_appender(x_logger_name IN t_logger.logger%TYPE,
-                                 x_appender    IN t_appender.appender%TYPE,
-                                 x_additivity  IN BOOLEAN DEFAULT TRUE) IS
+  PROCEDURE add_session_appender(x_logger_name   IN t_logger.logger%TYPE,
+                                 x_appender_code IN t_appender.code%TYPE,
+                                 x_additivity    IN BOOLEAN DEFAULT TRUE) IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'add_session_appender'; $END
     l_appenders t_logger.appenders%TYPE;
-    l_code      t_appender.code%TYPE;
+    l_dummy     VARCHAR2(1);
     l_hlogger   hash_type;
   BEGIN
     $IF $$debug $THEN
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_additivity: ' || bool_to_int(x_additivity));
     $END    
   
     BEGIN
-      SELECT a.code
-        INTO l_code
+      SELECT NULL
+        INTO l_dummy
         FROM t_appender a
-       WHERE a.appender = x_appender;
+       WHERE a.code = x_appender_code;
     EXCEPTION
       WHEN no_data_found THEN
         $IF $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'No such appender'); $END    
@@ -1842,7 +1818,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_appenders := nvl(sys_context(c_logger_appenders_ctx(c_session_flag), l_hlogger), 0);
     $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_appenders: ' || l_appenders); $END    
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bit_or',  'YES'); $END
-    l_appenders := bit_or(l_appenders, l_code);
+    l_appenders := bit_or(l_appenders, x_appender_code);
     $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_appenders: ' || l_appenders); $END    
     set_context_rac_aware(c_logger_names_ctx(c_session_flag), l_hlogger, x_logger_name, c_session_flag);
     set_context_rac_aware(c_logger_appenders_ctx(c_session_flag), l_hlogger, l_appenders, c_session_flag);
@@ -1963,28 +1939,28 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   /**
   * Procedure adds given appender to given logger and sets additivity flag for the logger in serialized settings.
   * @param x_logger_name Logger name.
-  * @param x_appender Binary coded appender.
+  * @param x_appender_code Appender code.
   * @param x_additivity Additivity flag.
   */
-  PROCEDURE add_serialized_appender(x_logger_name IN t_logger.logger%TYPE,
-                                    x_appender    IN t_appender.appender%TYPE,
-                                    x_additivity  IN BOOLEAN DEFAULT TRUE) IS
+  PROCEDURE add_serialized_appender(x_logger_name   IN t_logger.logger%TYPE,
+                                    x_appender_code IN t_appender.code%TYPE,
+                                    x_additivity    IN BOOLEAN DEFAULT TRUE) IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'add_serialized_appender'; $END
     l_appenders t_logger.appenders%TYPE;
-    l_code      t_appender.code%TYPE;
+    l_dummy     VARCHAR2(1);
   BEGIN
     $IF $$debug $THEN
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_additivity: ' || bool_to_int(x_additivity));
     $END    
   
     BEGIN
-      SELECT a.code
-        INTO l_code
+      SELECT NULL
+        INTO l_dummy
         FROM t_appender a
-       WHERE a.appender = x_appender;
+       WHERE a.code = x_appender_code;
     EXCEPTION
       WHEN no_data_found THEN
         $IF $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'No such appender'); $END    
@@ -1993,7 +1969,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     
     -- add appender    
     l_appenders := coalesce(g_serialized_settings.loggers(x_logger_name).enabled_appenders, 0);
-    l_appenders := bit_or(l_appenders, l_code);
+    l_appenders := bit_or(l_appenders, x_appender_code);
     $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_appenders: ' || l_appenders); $END
     g_serialized_settings.loggers(x_logger_name).enabled_appenders := l_appenders;
     g_serialized_settings.loggers(x_logger_name).additivity := bool_to_int(x_additivity);
@@ -2003,25 +1979,25 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   /**
   * Procedure removes given appender from given logger in serialized settings.
   * @param x_logger_name Logger name.
-  * @param x_appender Binary coded appender.
+  * @param x_appender_code Appender code.
   */
-  PROCEDURE remove_serialized_appender(x_logger_name IN t_logger.logger%TYPE,
-                                       x_appender    IN t_appender.appender%TYPE) IS
+  PROCEDURE remove_serialized_appender(x_logger_name   IN t_logger.logger%TYPE,
+                                       x_appender_code IN t_appender.code%TYPE) IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'remove_serialized_appender'; $END
     l_appenders t_logger.appenders%TYPE;
-    l_code      t_appender.code%TYPE;
+    l_dummy     VARCHAR2(1);
   BEGIN
     $IF $$debug $THEN
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code); 
     $END    
 
     BEGIN
-      SELECT a.code
-        INTO l_code
+      SELECT NULL
+        INTO l_dummy
         FROM t_appender a
-       WHERE a.appender = x_appender;
+       WHERE a.code = x_appender_code;
     EXCEPTION
       WHEN no_data_found THEN
         $IF $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'No such appender'); $END 
@@ -2031,8 +2007,8 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_appenders := coalesce(g_serialized_settings.loggers(x_logger_name).enabled_appenders, 0);
     $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_appenders' || l_appenders); $END     
     
-    IF bitand(l_appenders, l_code) > 0 THEN
-      l_appenders := bit_xor(l_appenders, l_code);
+    IF bitand(l_appenders, x_appender_code) > 0 THEN
+      l_appenders := bit_xor(l_appenders, x_appender_code);
       $IF $$debug $THEN 
         internal_log(logging.c_info_level, l_intlogger, 'Removing appender.'); 
         internal_log(logging.c_debug_level, l_intlogger, 'l_appenders' || l_appenders); 
@@ -2064,29 +2040,25 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   /**
   * Procedure sets session value for given parameter name, appender and application.
   * @param x_app Application name.
-  * @param x_appender Appender name.
+  * @param x_appender_code_code Appender code.
   * @param x_parameter_name Parameter name.
   * @param x_parameter_value Parameter value.
   */
   PROCEDURE set_serialized_appender_param(x_app             IN t_app_appender.app%TYPE,
-                                          x_appender        IN t_app_appender.appender%TYPE,
+                                          x_appender_code   IN t_app_appender.appender_code%TYPE,
                                           x_parameter_name  IN t_app_appender.parameter_name%TYPE,
                                           x_parameter_value IN t_app_appender.parameter_value%TYPE) IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_serialized_appender_param'; $END
-    l_code t_appender.code%type;
   BEGIN
     $IF $$debug $THEN
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_parameter_name: ' || x_parameter_name); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_parameter_value: ' || x_parameter_value); 
     $END
     
-    l_code := get_appender_code(x_appender);
-    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_code: ' || l_code); $END
-
-    g_serialized_settings.app_settings(x_app).appenders_params(l_code)(x_parameter_name) := x_parameter_value;
+    g_serialized_settings.app_settings(x_app).appenders_params(x_appender_code)(x_parameter_name) := x_parameter_value;
     $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'end'); $END
   END set_serialized_appender_param;
 
@@ -2094,24 +2066,24 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   /**
   * Procedure sets session layout for given appender and given application.
   * @param x_app Application name.
-  * @param x_appender Appender name.
+  * @param x_appender_code Appender code.
   * @param x_layout Layout.
   */
   PROCEDURE set_serialized_layout(x_app      IN t_app_appender.app%TYPE,
-                                  x_appender IN t_app_appender.appender%TYPE,
+                                  x_appender_code IN t_app_appender.appender_code%TYPE,
                                   x_layout   IN t_app_appender.parameter_value%TYPE) IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_serialized_layout'; $END
   BEGIN
     $IF $$debug $THEN
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_layout: ' || x_layout); 
     $END
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('set_serialized_appender_param','YES'); $END
     set_serialized_appender_param(x_app             => x_app,
-                                  x_appender        => x_appender,
+                                  x_appender_code   => x_appender_code,
                                   x_parameter_name  => c_layout_param,
                                   x_parameter_value => x_layout);
     $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'end'); $END
@@ -2283,9 +2255,13 @@ CREATE OR REPLACE PACKAGE BODY logging IS
         IF l_additivity IS NOT NULL THEN
           set_serialized_additivity(x_logger_name => l_logger, x_additivity => int_to_bool(l_additivity));
         END IF;
-        -- TODO: remove select (add_appender should accept a code)
-        FOR l_row IN (SELECT a.appender FROM t_appender a WHERE bitand(a.code, l_appenders) = a.code) LOOP
-          add_serialized_appender(x_logger_name => l_logger, x_appender => l_row.appender);
+        
+        l_appender := 1;
+        WHILE l_appenders > l_appender LOOP
+          IF bitand(l_appenders, l_appender) = l_appender THEN 
+            add_serialized_appender(x_logger_name => l_logger, x_appender_code => l_appender);
+          END IF;
+          l_appender := l_appender*2;
         END LOOP;
       WHEN c_set_app_param_op THEN
         l_app := get_str_val(x_settings, l_pos, l_pos);
@@ -2336,10 +2312,14 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                                x_additivity => int_to_bool(x_settings.loggers(l_logger).additivity));
       END IF;
 
-      --TODO: remove select - use code
-      FOR l_row IN (SELECT a.appender FROM t_appender a WHERE bitand(a.code, x_settings.loggers(l_logger).enabled_appenders) = a.code) LOOP
-        add_session_appender(x_logger_name => l_logger, x_appender => l_row.appender);
+      l_appender := 1;
+      WHILE x_settings.loggers(l_logger).enabled_appenders > l_appender LOOP
+        IF bitand(x_settings.loggers(l_logger).enabled_appenders, l_appender) = l_appender THEN 
+          add_session_appender(x_logger_name => l_logger, x_appender_code => l_appender);
+        END IF;
+        l_appender := l_appender*2;
       END LOOP;
+
       l_logger :=  x_settings.loggers.next(l_logger);
     END LOOP;
      
@@ -2360,7 +2340,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
         l_param_name := g_serialized_settings.app_settings(l_app).appenders_params(l_appender).first;       
         WHILE l_param_name IS NOT NULL LOOP
           set_session_appender_param(x_app => l_app,
-                                     x_appender =>  l_appender,
+                                     x_appender_code =>  l_appender,
                                      x_parameter_name => l_param_name,
                                      x_parameter_value => g_serialized_settings.app_settings(l_app).appenders_params(l_appender)(l_param_name));
           l_param_name := g_serialized_settings.app_settings(l_app).appenders_params(l_appender).next(l_param_name);
@@ -2440,26 +2420,26 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   /**
   * Procedure removes given session appenders from given logger.
   * @param x_logger_name Logger name.
-  * @param x_appender Binary coded Appender list.
+  * @param x_appender_code Appender code.
   */
-  PROCEDURE remove_session_appender(x_logger_name IN t_logger.logger%TYPE,
-                                    x_appender    IN t_appender.appender%TYPE) IS
+  PROCEDURE remove_session_appender(x_logger_name   IN t_logger.logger%TYPE,
+                                    x_appender_code IN t_appender.code%TYPE) IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'remove_session_appender'; $END
     l_appenders t_logger.appenders%TYPE;
-    l_code      t_appender.code%TYPE;
+    l_dummy     VARCHAR2(1);
     l_hlogger   hash_type;
   BEGIN
     $IF $$debug $THEN
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name); 
-      internal_log(logging.c_debug_level, l_intlogger, 'x_appender: ' || x_appender); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code); 
     $END    
 
     BEGIN
-      SELECT a.code
-        INTO l_code
+      SELECT NULL
+        INTO l_dummy
         FROM t_appender a
-       WHERE a.appender = x_appender;
+       WHERE a.code = x_appender_code;
     EXCEPTION
       WHEN no_data_found THEN
         $IF $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'No such appender'); $END 
@@ -2476,9 +2456,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $END     
     
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bitand',  'YES'); $END
-    IF bitand(l_appenders, l_code) > 0 THEN
+    IF bitand(l_appenders, x_appender_code) > 0 THEN
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bit_xor',  'YES'); $END
-      l_appenders := bit_xor(l_appenders, l_code);
+      l_appenders := bit_xor(l_appenders, x_appender_code);
       $IF $$debug $THEN 
         internal_log(logging.c_info_level, l_intlogger, 'Removing appender from context' || l_hlogger); 
         internal_log(logging.c_debug_level, l_intlogger, 'l_appenders' || l_appenders); 
@@ -2642,7 +2622,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       g_mail_buffer.buffer    := mail_table_type();
       g_mail_buffer.buff_size := 1000;
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_appender_param',  'YES'); $END
-      g_mail_buffer.buff_size := coalesce(get_appender_param(x_app, 'SMTP', 'MAIL_BUFFER_LINES', c_global_flag), 1000);
+      g_mail_buffer.buff_size := coalesce(get_appender_param(x_app, c_smtp_appender, 'MAIL_BUFFER_LINES', c_global_flag), 1000);
       g_mail_buffer.buffer.EXTEND(g_mail_buffer.buff_size);
       $IF $$debug $THEN 
         internal_log(logging.c_trace_level, l_intlogger, 'g_mail_buffer.buff_size: ' || g_mail_buffer.buff_size);
@@ -2975,19 +2955,19 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $END
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
-    l_host := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_HOST');
+    l_host := get_current_appender_param(x_app, c_smtp_appender, 'SEND_MAIL_HOST');
     $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_host: ' || l_host); $END
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
-    l_from := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_FROM');
+    l_from := get_current_appender_param(x_app, c_smtp_appender, 'SEND_MAIL_FROM');
     $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_from: ' || l_from); $END
     
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
-    l_port := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_PORT');
+    l_port := get_current_appender_param(x_app, c_smtp_appender, 'SEND_MAIL_PORT');
     $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_port: ' || l_port); $END
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
-    l_timeout := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_TIMEOUT');
+    l_timeout := get_current_appender_param(x_app, c_smtp_appender, 'SEND_MAIL_TIMEOUT');
     $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_timeout: ' || l_timeout); $END
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
@@ -3008,13 +2988,13 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     END IF;
     
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
-    l_to  := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_TO');
+    l_to  := get_current_appender_param(x_app, c_smtp_appender, 'SEND_MAIL_TO');
     $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_to: ' || l_to); $END    
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END    
-    l_cc  := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_CC');
+    l_cc  := get_current_appender_param(x_app, c_smtp_appender, 'SEND_MAIL_CC');
     $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_cc: ' || l_cc); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
-    l_bcc := get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_BCC');
+    l_bcc := get_current_appender_param(x_app, c_smtp_appender, 'SEND_MAIL_BCC');
     $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_bcc: ' || l_bcc); $END
 
     IF l_to IS NOT NULL THEN
@@ -3052,7 +3032,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     utl_smtp.write_data(l_conn, 'To: ' || l_to || utl_tcp.crlf);
     utl_smtp.write_data(l_conn, 'Cc: ' || l_cc || utl_tcp.crlf);
     utl_smtp.write_data(l_conn,
-                        'Subject: ' || get_current_appender_param(x_app, 'SMTP', 'SEND_MAIL_SUBJECT') ||
+                        'Subject: ' || get_current_appender_param(x_app, c_smtp_appender, 'SEND_MAIL_SUBJECT') ||
                         utl_tcp.crlf);
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('is_cyclic_buffer_empty',  'YES'); $END
@@ -3061,10 +3041,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
                           --                          convert(
                           dequeue_from_cyclic_buffer() --,
                           --                                  get_current_appender_param(x_app,
-                          --                                                             'SMTP',
+                          --                                                             c_smtp_appender,
                           --                                                             'SEND_MAIL_ORA_CHARSET'))
                           /*utl_encode.text_encode(dequeue_from_cyclic_buffer(),
-                         f_get_current_appender_param(x_app, 'SMTP', 'send_mail_ora_charset'),
+                         f_get_current_appender_param(x_app, c_smtp_appender, 'send_mail_ora_charset'),
                          utl_encode.base64)*/);
     END LOOP;
 
@@ -3126,7 +3106,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     END IF;
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_current_appender_param',  'YES'); $END
-    l_trigger_level := get_current_appender_param(x_app, 'SMTP', 'TRIGGER_LEVEL');
+    l_trigger_level := get_current_appender_param(x_app, c_smtp_appender, 'TRIGGER_LEVEL');
     $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_trigger_level: ' || l_trigger_level);  $END
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_level_severity',  'YES'); $END
@@ -3294,7 +3274,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bitand', 'YES'); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_appender_code', 'YES'); $END
-    IF bitand(x_logger.enabled_appenders, get_appender_code(c_table_appender)) > 0 THEN
+    IF bitand(x_logger.enabled_appenders, c_table_appender) > 0 THEN
       $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Table appender enabled.');  $END
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('log_table',  'YES'); $END
       log_table(x_logger.app, x_logger.logger, x_level, x_message, x_log_call_stack, x_log_backtrace);
@@ -3302,7 +3282,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bitand', 'YES'); $END
     $IF  dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_appender_code', 'YES'); $END
-    IF bitand(x_logger.enabled_appenders, get_appender_code(c_dbms_output_appender)) > 0 THEN
+    IF bitand(x_logger.enabled_appenders, c_dbms_output_appender) > 0 THEN
       $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'dbms_output appender enabled.');  $END
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('log_stdout',  'YES'); $END
       log_stdout(x_logger.app, x_logger.logger, x_level, x_message, x_log_call_stack, x_log_backtrace);
@@ -3310,7 +3290,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('bitand', 'YES'); $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('get_appender_code', 'YES'); $END
-    IF bitand(x_logger.enabled_appenders, get_appender_code(c_smtp_appender)) > 0 THEN
+    IF bitand(x_logger.enabled_appenders, c_smtp_appender) > 0 THEN
       $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'SMTP appender enabled.');  $END
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('log_smtp',  'YES'); $END
       log_smtp(x_logger.app, x_logger.logger, x_level, x_message, x_log_call_stack, x_log_backtrace);

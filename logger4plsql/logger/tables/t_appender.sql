@@ -1,12 +1,16 @@
 create table t_appender
 (
   appender          varchar2(30) not null,
-  code              number(38) not null,
+  code              number(10) not null,
   base_context_name varchar2(28) not null,
-  constraint pk_appender primary key (appender)
+  constraint pk_appender primary key (code)
 )
 organization index
 tablespace &index_tablespace_small;
+
+alter table t_appender
+  add constraint uk_appender unique (appender)
+  using index tablespace &index_tablespace_small;
 
 alter table t_appender
   add constraint chk_appender_upper
@@ -18,6 +22,6 @@ comment on table t_appender
 comment on column t_appender.appender
   is 'Appender name';
 comment on column t_appender.code
-  is 'Appender code: 2^n';
+  is 'Appender code: 2^n, n = 0..31';
 comment on column t_appender.base_context_name
   is 'Basename for the appender''s contexts. Global context has a suffix _G. Local context has a suffix _L.';

@@ -112,13 +112,13 @@ CREATE OR REPLACE PACKAGE logging IS
   c_off_level CONSTANT t_log_level.log_level%TYPE := 'OFF';
 
   /** TABLE appender. */
-  c_table_appender CONSTANT t_appender.appender%TYPE := 'TABLE';
+  c_table_appender CONSTANT t_appender.code%TYPE := 1;
 
   /** DBMS_OUTPUT appender. */
-  c_dbms_output_appender CONSTANT t_appender.appender%TYPE := 'DBMS_OUTPUT';
+  c_dbms_output_appender CONSTANT t_appender.code%TYPE := 2;
 
   /** SMTP appender. */
-  c_smtp_appender CONSTANT t_appender.appender%TYPE := 'SMTP';
+  c_smtp_appender CONSTANT t_appender.code%TYPE := 4;
 
   -- these elements are defined only if internal debugging is set to TRUE
   $IF $$debug $THEN
@@ -170,27 +170,26 @@ CREATE OR REPLACE PACKAGE logging IS
                           x_logger_name IN t_logger.logger%TYPE,
                           x_level       IN t_logger.log_level%TYPE) RETURN VARCHAR2;
     FUNCTION get_app(x_schema IN t_schema_app.schema%TYPE) RETURN t_schema_app.app%TYPE;
-    FUNCTION get_appender_code(x_appender IN t_appender.appender%TYPE) RETURN t_appender.code%TYPE;
     FUNCTION get_appender_param(x_app            IN t_app_appender.app%TYPE,
-                                x_appender       IN t_app_appender.appender%TYPE,
+                                x_appender_code  IN t_app_appender.appender_code%TYPE,
                                 x_parameter_name IN t_app_appender.parameter_name%TYPE,
                                 x_visibility     IN visibility_type DEFAULT c_global_flag) RETURN t_app_appender.parameter_value%TYPE;  
     FUNCTION get_appenders(x_logger_name  IN t_logger.logger%TYPE,
-                               x_app_ctx_name IN ctx_namespace_type,
-                               x_add_ctx_name IN ctx_namespace_type) RETURN t_logger.appenders%TYPE;
+                           x_app_ctx_name IN ctx_namespace_type,
+                           x_add_ctx_name IN ctx_namespace_type) RETURN t_logger.appenders%TYPE;
     FUNCTION get_current_appender_param(x_app            IN t_app_appender.app%TYPE,
-                                        x_appender       IN t_app_appender.appender%TYPE,
+                                        x_appender_code  IN t_app_appender.appender_code%TYPE,
                                         x_parameter_name IN t_app_appender.parameter_name%TYPE) RETURN t_app_appender.parameter_value%TYPE;
-    FUNCTION get_current_layout(x_app      IN t_app_appender.app%TYPE,
-                                x_appender IN t_app_appender.appender%TYPE) RETURN t_app_appender.parameter_value%TYPE;
+    FUNCTION get_current_layout(x_app           IN t_app_appender.app%TYPE,
+                                x_appender_code IN t_app_appender.appender_code%TYPE) RETURN t_app_appender.parameter_value%TYPE;
     FUNCTION get_current_parameter(x_app        IN t_param.app%TYPE,
                                  x_param_name IN t_param.param_name%TYPE) RETURN t_param.param_value%TYPE;
     FUNCTION get_current_used_appenders(x_logger_name IN t_logger.logger%TYPE) RETURN t_logger.appenders%TYPE;
     FUNCTION get_current_used_level(x_logger_name IN t_logger.logger%TYPE) RETURN t_logger.log_level%TYPE;
     FUNCTION get_deserialized_settings(x_settings IN ctx_value_type) RETURN deserialized_settings_type;
-    FUNCTION get_layout(x_app        IN t_app_appender.app%TYPE,
-                      x_appender   IN t_app_appender.appender%TYPE,
-                      x_visibility IN visibility_type DEFAULT c_global_flag)
+    FUNCTION get_layout(x_app           IN t_app_appender.app%TYPE,
+                        x_appender_code IN t_app_appender.appender_code%TYPE,
+                        x_visibility    IN visibility_type DEFAULT c_global_flag)
     RETURN t_app_appender.parameter_value%TYPE;
     FUNCTION get_level(x_logger_name IN t_logger.logger%TYPE,
                      x_ctx_name    IN VARCHAR2) RETURN t_logger.log_level%TYPE;
@@ -216,23 +215,23 @@ CREATE OR REPLACE PACKAGE logging IS
                 x_log_backtrace  IN BOOLEAN,
                 x_log_call_stack IN BOOLEAN);
     PROCEDURE log_smtp(x_app           IN t_app_appender.app%TYPE,
-                     x_logger_name   IN t_logger.logger%TYPE,
-                     x_level         IN t_log_level.log_level%TYPE,
-                     x_message       IN message_type,
-                     x_call_stack    IN BOOLEAN,
-                     x_log_backtrace IN BOOLEAN);
-    PROCEDURE log_stdout(x_app           IN t_app_appender.app%TYPE,
                        x_logger_name   IN t_logger.logger%TYPE,
                        x_level         IN t_log_level.log_level%TYPE,
                        x_message       IN message_type,
                        x_call_stack    IN BOOLEAN,
                        x_log_backtrace IN BOOLEAN);
+    PROCEDURE log_stdout(x_app           IN t_app_appender.app%TYPE,
+                         x_logger_name   IN t_logger.logger%TYPE,
+                         x_level         IN t_log_level.log_level%TYPE,
+                         x_message       IN message_type,
+                         x_call_stack    IN BOOLEAN,
+                         x_log_backtrace IN BOOLEAN);
     PROCEDURE log_table(x_app           IN t_app_appender.app%TYPE,
-                      x_logger_name   IN t_logger.logger%TYPE,
-                      x_level         IN t_log_level.log_level%TYPE,
-                      x_message       IN message_type,
-                      x_call_stack    IN BOOLEAN,
-                      x_log_backtrace IN BOOLEAN);
+                        x_logger_name   IN t_logger.logger%TYPE,
+                        x_level         IN t_log_level.log_level%TYPE,
+                        x_message       IN message_type,
+                        x_call_stack    IN BOOLEAN,
+                        x_log_backtrace IN BOOLEAN);
     PROCEDURE parse_stack(o_logger     OUT VARCHAR2,
                           o_app        OUT VARCHAR2,
                           x_method     IN VARCHAR2 DEFAULT NULL,
@@ -359,44 +358,44 @@ CREATE OR REPLACE PACKAGE logging IS
   /**
   * Procedure sets global layout for given appender and given application.
   * @param x_app Application name.
-  * @param x_appender Appender name.
+  * @param x_appender_code Appender cpde.
   * @param x_layout Layout.
   */
-  PROCEDURE set_global_layout(x_app      IN t_app_appender.app%TYPE,
-                              x_appender IN t_app_appender.appender%TYPE,
-                              x_layout   IN t_app_appender.parameter_value%TYPE);
+  PROCEDURE set_global_layout(x_app           IN t_app_appender.app%TYPE,
+                              x_appender_code IN t_app_appender.appender_code%TYPE,
+                              x_layout        IN t_app_appender.parameter_value%TYPE);
 
   /**
   * Procedure sets session layout for given appender and given application.
   * @param x_app Application name.
-  * @param x_appender Appender name.
+  * @param x_appender_code Appender code.
   * @param x_layout Layout.
   */
-  PROCEDURE set_session_layout(x_app      IN t_app_appender.app%TYPE,
-                               x_appender IN t_app_appender.appender%TYPE,
-                               x_layout   IN t_app_appender.parameter_value%TYPE);
+  PROCEDURE set_session_layout(x_app           IN t_app_appender.app%TYPE,
+                               x_appender_code IN t_app_appender.appender_code%TYPE,
+                               x_layout        IN t_app_appender.parameter_value%TYPE);
 
   /**
   * Procedure sets global value for given parameter name, appender and application.
   * @param x_app Application name.
-  * @param x_appender Appender name.
+  * @param x_appender_code Appender code.
   * @param x_parameter_name Parameter name.
   * @param x_parameter_value Parameter value.
   */
   PROCEDURE set_global_appender_param(x_app             IN t_app_appender.app%TYPE,
-                                      x_appender        IN t_app_appender.appender%TYPE,
+                                      x_appender_code   IN t_app_appender.appender_code%TYPE,
                                       x_parameter_name  IN t_app_appender.parameter_name%TYPE,
                                       x_parameter_value IN t_app_appender.parameter_value%TYPE);
 
   /**
   * Procedure sets session value for given parameter name, appender and application.
   * @param x_app Application name.
-  * @param x_appender Appender name.
+  * @param x_appender_code Appender code.
   * @param x_parameter_name Parameter name.
   * @param x_parameter_value Parameter value.
   */
   PROCEDURE set_session_appender_param(x_app             IN t_app_appender.app%TYPE,
-                                       x_appender        IN t_app_appender.appender%TYPE,
+                                       x_appender_code   IN t_app_appender.appender_code%TYPE,
                                        x_parameter_name  IN t_app_appender.parameter_name%TYPE,
                                        x_parameter_value IN t_app_appender.parameter_value%TYPE);
 
@@ -417,24 +416,24 @@ CREATE OR REPLACE PACKAGE logging IS
                               x_log_level   IN t_logger.log_level%TYPE);
 
   /**
-  * Procedure adds given global appenders to given logger and sets global additivity flag for the logger.
+  * Procedure adds given global appender to given logger and sets global additivity flag for the logger.
   * @param x_logger_name Logger name.
-  * @param x_appender Binary coded Appender list.
+  * @param x_appender Appender code.
   * @param x_additivity Additivity flag.
   */
-  PROCEDURE add_global_appender(x_logger_name IN t_logger.logger%TYPE,
-                                x_appender    IN t_appender.appender%TYPE,
-                                x_additivity  IN BOOLEAN DEFAULT TRUE);
+  PROCEDURE add_global_appender(x_logger_name   IN t_logger.logger%TYPE,
+                                x_appender_code IN t_appender.code%TYPE,
+                                x_additivity    IN BOOLEAN DEFAULT TRUE);
 
   /**
-  * Procedure adds given session appenders to given logger and sets session additivity flag for the logger.
+  * Procedure adds given session appender to given logger and sets session additivity flag for the logger.
   * @param x_logger_name Logger name.
-  * @param x_appender Binary coded Appender list.
+  * @param x_appender_code Binary coded Appender code.
   * @param x_additivity Additivity flag.
   */
-  PROCEDURE add_session_appender(x_logger_name IN t_logger.logger%TYPE,
-                                 x_appender    IN t_appender.appender%TYPE,
-                                 x_additivity  IN BOOLEAN DEFAULT TRUE);
+  PROCEDURE add_session_appender(x_logger_name   IN t_logger.logger%TYPE,
+                                 x_appender_code IN t_appender.code%TYPE,
+                                 x_additivity    IN BOOLEAN DEFAULT TRUE);
 
   /**
   * Procedure sets global additivity flag for given logger.
@@ -455,18 +454,18 @@ CREATE OR REPLACE PACKAGE logging IS
   /**
   * Procedure removes givne global appenders from given logger.
   * @param x_logger_name Logger name.
-  * @param x_appender Binary coded Appender list.
+  * @param x_appender_code Appender code.
   */
-  PROCEDURE remove_global_appender(x_logger_name IN t_logger.logger%TYPE,
-                                   x_appender    IN t_appender.appender%TYPE);
+  PROCEDURE remove_global_appender(x_logger_name   IN t_logger.logger%TYPE,
+                                   x_appender_code IN t_appender.code%TYPE);
 
   /**
   * Procedure removes given session appenders from given logger.
   * @param x_logger_name Logger name.
-  * @param x_appender Binary coded Appender list.
+  * @param x_appender_code Appender code.
   */
-  PROCEDURE remove_session_appender(x_logger_name IN t_logger.logger%TYPE,
-                                    x_appender    IN t_appender.appender%TYPE);
+  PROCEDURE remove_session_appender(x_logger_name   IN t_logger.logger%TYPE,
+                                    x_appender_code IN t_appender.code%TYPE);
 
   /**
   * Procedure logs message with TRACE log level (according to the selection rule) for given logger.
@@ -638,20 +637,20 @@ CREATE OR REPLACE PACKAGE logging IS
   /**
   * Procedure adds given appender to given logger and sets additivity flag for the logger in serialized settings.
   * @param x_logger_name Logger name.
-  * @param x_appender Binary coded appender.
+  * @param x_appender_code Appender code.
   * @param x_additivity Additivity flag.
   */
-  PROCEDURE add_serialized_appender(x_logger_name IN t_logger.logger%TYPE,
-                                    x_appender    IN t_appender.appender%TYPE,
-                                    x_additivity  IN BOOLEAN DEFAULT TRUE);
+  PROCEDURE add_serialized_appender(x_logger_name   IN t_logger.logger%TYPE,
+                                    x_appender_code IN t_appender.code%TYPE,
+                                    x_additivity    IN BOOLEAN DEFAULT TRUE);
                                     
   /**
   * Procedure removes given appender from given logger in serialized settings.
   * @param x_logger_name Logger name.
-  * @param x_appender Binary coded appender.
+  * @param x_appender_code Appender code.
   */
-  PROCEDURE remove_serialized_appender(x_logger_name IN t_logger.logger%TYPE,
-                                       x_appender    IN t_appender.appender%TYPE);
+  PROCEDURE remove_serialized_appender(x_logger_name   IN t_logger.logger%TYPE,
+                                       x_appender_code IN t_appender.code%TYPE);
                                        
   /**
   * Procedure sets additivity flag for given logger in serialized settings.
@@ -664,24 +663,24 @@ CREATE OR REPLACE PACKAGE logging IS
   /**
   * Procedure sets session value for given parameter name, appender and application.
   * @param x_app Application name.
-  * @param x_appender Appender name.
+  * @param x_appender_code Appender code.
   * @param x_parameter_name Parameter name.
   * @param x_parameter_value Parameter value.
   */
   PROCEDURE set_serialized_appender_param(x_app             IN t_app_appender.app%TYPE,
-                                          x_appender        IN t_app_appender.appender%TYPE,
+                                          x_appender_code   IN t_app_appender.appender_code%TYPE,
                                           x_parameter_name  IN t_app_appender.parameter_name%TYPE,
                                           x_parameter_value IN t_app_appender.parameter_value%TYPE);
                                           
   /**
   * Procedure sets session layout for given appender and given application.
   * @param x_app Application name.
-  * @param x_appender Appender name.
+  * @param x_appender_code Appender code.
   * @param x_layout Layout.
   */
-  PROCEDURE set_serialized_layout(x_app      IN t_app_appender.app%TYPE,
-                                  x_appender IN t_app_appender.appender%TYPE,
-                                  x_layout   IN t_app_appender.parameter_value%TYPE);
+  PROCEDURE set_serialized_layout(x_app           IN t_app_appender.app%TYPE,
+                                  x_appender_code IN t_app_appender.appender_code%TYPE,
+                                  x_layout        IN t_app_appender.parameter_value%TYPE);
                                   
    /**
   * Procedure sets session log level for given logger.
