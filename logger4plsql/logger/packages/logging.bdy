@@ -49,23 +49,6 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     buffer    mail_table_type -- buffer containg logs
     );
 
-  /** Identifier for the session which consists of two componets:
-  * {*} instance number  Retrieved from sys_context('userenv', 'instance')
-  * {*} session_id       Retrieved from sys_context('userenv', 'sessionid')
-  * session_id has been chosen, bacause sid is recycled and serial# is not held in userenv context
-  * The implication is: Feature for setting context for a given session cannot be used for SYSDBA accounts.
-  */
-  g_session_identifier global_context.attribute%TYPE;
-
-  /** SMTP appender: Cyclic buffer global variable. */
-  g_mail_buffer mail_cyclic_buffer_type;
-  
-  /** Hash for the root logger */
-  g_root_logger_hash hash_type;
-
-  /** A variable for builtding serialized settings */
-  g_serialized_settings serialized_settings_type;
-
   -- these elements are defined only if internal debugging is set to TRUE
   $IF $$debug $THEN
   /** Type for severity collection for the internal debugging. */
@@ -85,6 +68,32 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
   /** Flag for visibility: session */
   c_session_flag CONSTANT visibility_type := 2;
+
+  /** Type used for serialization of loggers parameters */
+  TYPE logger_settings_type IS RECORD (
+     enabled_appenders  t_logger.appenders%TYPE,
+     log_level          t_logger.log_level%TYPE,
+     additivity         t_logger.additivity%TYPE       
+  );
+  
+  /** Collection type of loggers used for serialization of loggers parameters */
+  TYPE logger_settings_col_type IS TABLE OF logger_settings_type INDEX BY t_logger.logger%TYPE;
+  
+  /** Type for application settings: application parameters and appender parameters */  
+  TYPE app_settings_type IS RECORD (
+     app_params       appender_params_type,
+     appenders_params appenders_params_type
+  );
+  
+  /** Collection of application settings */
+  TYPE app_settings_col_type IS TABLE OF app_settings_type INDEX BY t_app.app%TYPE;
+  
+  /** Type for serialized logging settings. */
+  TYPE deserialized_settings_type IS RECORD (
+     loggers          logger_settings_col_type,
+     app_settings     app_settings_col_type
+  );
+
   $END
 
   /** Type for context list */
@@ -154,6 +163,23 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
   /** Qualified name of this package. */
   c_package_name CONSTANT ctx_namespace_type := c_schema_name || '.' || $$PLSQL_UNIT;
+
+  /** Identifier for the session which consists of two componets:
+  * {*} instance number  Retrieved from sys_context('userenv', 'instance')
+  * {*} session_id       Retrieved from sys_context('userenv', 'sessionid')
+  * session_id has been chosen, bacause sid is recycled and serial# is not held in userenv context
+  * The implication is: Feature for setting context for a given session cannot be used for SYSDBA accounts.
+  */
+  g_session_identifier global_context.attribute%TYPE;
+
+  /** SMTP appender: Cyclic buffer global variable. */
+  g_mail_buffer mail_cyclic_buffer_type;
+  
+  /** Hash for the root logger */
+  g_root_logger_hash hash_type;
+
+  /** A variable for builtding serialized settings */
+  g_serialized_settings deserialized_settings_type;
 
    -- these elements are defined only if internal debugging is set to TRUE
   $IF $$debug $THEN
@@ -771,14 +797,11 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $END
 
     IF sys_context(x_ctx, c_init_param) IS NOT NULL THEN
-      $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Result: TRUE'); $END
+      $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Result (end): TRUE'); $END
       RETURN TRUE;
     END IF;
 
-    $IF $$debug $THEN
-      internal_log(logging.c_debug_level, l_intlogger, 'Result: FALSE');
-      internal_log(logging.c_info_level, l_intlogger, 'end');
-    $END
+    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'Result (end): FALSE'); $END
     RETURN FALSE;
   END is_initialized;
 
@@ -792,7 +815,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('is_initialized',  'YES'); $END
     IF is_initialized(c_global_levels_ctx) THEN
-      $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Context already initialized'); $END
+      $IF $$debug $THEN 
+        internal_log(logging.c_info_level, l_intlogger, 'Context already initialized');
+        internal_log(logging.c_debug_level, l_intlogger, 'end'); 
+      $END
       RETURN;
     END IF;
 
@@ -829,7 +855,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('is_initialized',  'YES'); $END
     IF x_visibility = c_global_flag AND is_initialized(c_global_appenders_ctx) THEN
-      $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Context already initialized'); $END
+      $IF $$debug $THEN 
+        internal_log(logging.c_info_level, l_intlogger, 'Context already initialized');
+        internal_log(logging.c_debug_level, l_intlogger, 'end'); 
+      $END
       RETURN;
     END IF;
 
@@ -895,7 +924,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('is_initialized',  'YES'); $END
     IF is_initialized(c_parameters_ctx(x_visibility)) THEN
-      $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Context already initialized'); $END
+      $IF $$debug $THEN 
+        internal_log(logging.c_info_level, l_intlogger, 'Context already initialized');
+        internal_log(logging.c_debug_level, l_intlogger, 'end'); 
+      $END
       RETURN;
     END IF;
 
@@ -947,7 +979,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('is_initialized',  'YES'); $END
     IF is_initialized(c_logger_names_ctx(x_visibility)) THEN
-      $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Context already initialized'); $END
+      $IF $$debug $THEN 
+        internal_log(logging.c_info_level, l_intlogger, 'Context already initialized');
+        internal_log(logging.c_debug_level, l_intlogger, 'end'); 
+      $END
       RETURN;
     END IF;
 
@@ -987,7 +1022,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   PROCEDURE init_session_identifier IS 
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'init_session_identifier'; $END
   BEGIN
-    $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'start'); $END
+    $IF $$debug $THEN 
+      internal_log(logging.c_info_level, l_intlogger, 'start');
+      internal_log(logging.c_debug_level, l_intlogger, 'end'); 
+    $END
     g_session_identifier := sys_context('userenv', 'instance') || '#' || sys_context('userenv', 'sessionid');
     $IF $$debug $THEN 
       internal_log(logging.c_debug_level, l_intlogger, 'g_session_identifier: ' || g_session_identifier);
@@ -1002,7 +1040,10 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   PROCEDURE init_user_app IS
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'init_user_app'; $END
   BEGIN
-    $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'start'); $END
+    $IF $$debug $THEN
+        internal_log(logging.c_info_level, l_intlogger, 'start');
+        internal_log(logging.c_debug_level, l_intlogger, 'end'); 
+    $END
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('is_initialized',  'YES'); $END
     IF is_initialized(c_global_user_app_ctx) THEN
       $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Context already initialized'); $END
@@ -1597,12 +1638,9 @@ CREATE OR REPLACE PACKAGE BODY logging IS
        SET l.appenders = bit_or(l.appenders, l_code), l.additivity = l_additivity
      WHERE l.logger = x_logger_name
     RETURNING appenders INTO l_appenders;
-    
-    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'l_appenders: ' || l_appenders); $END
 
     IF SQL%NOTFOUND THEN
       l_appenders := l_code;
-
       $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Inserting a new row'); $END
       INSERT INTO t_logger
         (logger, appenders, additivity)
@@ -1675,16 +1713,16 @@ CREATE OR REPLACE PACKAGE BODY logging IS
      WHERE l.logger = x_logger_name
     RETURNING appenders INTO l_appenders;
     
-    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_appenders: ' || l_appenders); $END
     IF SQL%NOTFOUND THEN
       l_appenders := 0;
-
       $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'Creating a new row'); $END
       INSERT INTO t_logger
         (logger, appenders, additivity)
       VALUES
         (x_logger_name, l_appenders, l_additivity);
     END IF;
+    
+    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_appenders: ' || l_appenders); $END
 
     $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
     l_hlogger := hash_logger_name(x_logger_name);
@@ -1748,7 +1786,6 @@ CREATE OR REPLACE PACKAGE BODY logging IS
        AND bitand(l.appenders, l_code) > 0
     RETURNING appenders INTO l_appenders;
 
-    $IF $$debug $THEN internal_log(logging.c_debug_level, l_intlogger, 'New l_appenders:' || l_appenders); $END 
     -- an appender with given code was set for given logger
     IF SQL%FOUND THEN
       $IF dbms_db_version.version >= 11 $THEN PRAGMA INLINE('hash_logger_name',  'YES'); $END
@@ -1911,6 +1948,17 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     set_context_rac_aware(c_parameters_ctx(c_session_flag), x_app || '#' || x_param_name, x_param_value, c_session_flag);
     $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'end'); $END
   END set_session_parameter;
+
+  /**
+  * Procedure clears all serialized settings.
+  */  
+  PROCEDURE clear_serialized_settings IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'clear_serialized_settings'; $END
+  BEGIN
+    internal_log(logging.c_info_level, l_intlogger, 'start');
+    g_serialized_settings := NULL;
+    internal_log(logging.c_info_level, l_intlogger, 'end');
+  END clear_serialized_settings;
   
   /**
   * Procedure adds given appender to given logger and sets additivity flag for the logger in serialized settings.
@@ -2038,7 +2086,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_code := get_appender_code(x_appender);
     $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'l_code: ' || l_code); $END
 
-    g_serialized_settings.appenders_params(l_code)(x_parameter_name) := x_parameter_value;
+    g_serialized_settings.app_settings(x_app).appenders_params(l_code)(x_parameter_name) := x_parameter_value;
     $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'end'); $END
   END set_serialized_appender_param;
 
@@ -2104,7 +2152,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
       internal_log(logging.c_debug_level, l_intlogger, 'x_param_name: ' || x_param_name); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_param_value: ' || x_param_value);
     $END    
-    g_serialized_settings.app_params(x_param_name) := x_param_value;
+    g_serialized_settings.app_settings(x_app).app_params(x_param_name) := x_param_value;
     $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'end'); $END
   END set_serialized_parameter;
 
@@ -2118,70 +2166,144 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     l_param_name t_app_appender.parameter_name%TYPE;
     l_append_param_name t_app_appender.parameter_name%TYPE;
     l_appender PLS_INTEGER;
-    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_serialized_parameter'; $END
+    l_app_name t_app.app%TYPE;
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'serialize_settings'; $END
   BEGIN
     $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'start'); $END
 
-    l_result := l_result || '{loggers:[';    
     l_logger_name := g_serialized_settings.loggers.first;
     WHILE l_logger_name IS NOT NULL LOOP
-       l_result := l_result || '{name:"'||l_logger_name||'",'||
-                   'appenders:'||coalesce(CAST(g_serialized_settings.loggers(l_logger_name).enabled_appenders AS VARCHAR2), 'null')||','||
-                   'level:"'||g_serialized_settings.loggers(l_logger_name).log_level||'"'||','||
-                   'add:'||coalesce(CAST(g_serialized_settings.loggers(l_logger_name).additivity AS VARCHAR2), 'null')||'}';
-       IF l_logger_name <> g_serialized_settings.loggers.last THEN
-         l_result := l_result || ',';
-       END IF;
-       
+       l_result := l_result || c_set_logger_op || c_ser_delim
+                   || l_logger_name || c_ser_delim
+                   || CAST(g_serialized_settings.loggers(l_logger_name).enabled_appenders AS VARCHAR2) || c_ser_delim
+                   || g_serialized_settings.loggers(l_logger_name).log_level || c_ser_delim
+                   || CAST(g_serialized_settings.loggers(l_logger_name).additivity AS VARCHAR2) || c_ser_delim;
        l_logger_name := g_serialized_settings.loggers.next(l_logger_name);
-    END LOOP;    
-    l_result := l_result || ']';
+    END LOOP; 
     $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'Loggers added: ' || l_result); $END
-   
-    l_result := l_result || ',app_params:[';
-    l_param_name := g_serialized_settings.app_params.first;
-    WHILE l_param_name IS NOT NULL LOOP
-       l_result := l_result || '{name:"'||l_param_name||'",'||
-                   'value:"'||g_serialized_settings.app_params(l_param_name)||'"}';
-       IF l_param_name <> g_serialized_settings.app_params.last THEN
-         l_result := l_result || ',';
-       END IF;
-       
-       l_param_name := g_serialized_settings.loggers.next(l_param_name);
-    END LOOP;    
-    l_result := l_result || ']';
-    $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'App params added: ' || l_result); $END
-    l_result := l_result || ',appenders_params:[';
-    
-    l_appender := g_serialized_settings.appenders_params.first;
-    WHILE l_appender IS NOT NULL LOOP
-       l_result := l_result || l_appender || ':[';
-       
-       l_append_param_name := g_serialized_settings.appenders_params(l_appender).first;       
-       WHILE l_append_param_name IS NOT NULL LOOP
-         l_result := l_result || '{name:"'||l_append_param_name||'",'||
-                     'value:"'||g_serialized_settings.appenders_params(l_appender)(l_append_param_name)||'"}';
-         IF l_append_param_name <> g_serialized_settings.appenders_params(l_appender).last THEN
-           l_result := l_result || ',';
-         END IF;
-         l_append_param_name := g_serialized_settings.appenders_params(l_appender).next(l_append_param_name);
-       END LOOP;
-       
-       l_result := l_result || ']';
-       IF l_appender <> g_serialized_settings.appenders_params.last THEN
-         l_result := l_result || ',';
-       END if;
 
-       l_appender := g_serialized_settings.appenders_params.next(l_appender);
-    END LOOP;    
-    
-    l_result := l_result || ']}';    
+    l_app_name := g_serialized_settings.app_settings.first;
+    WHILE l_app_name IS NOT NULL LOOP    
+      l_param_name := g_serialized_settings.app_settings(l_app_name).app_params.first;
+      WHILE l_param_name IS NOT NULL LOOP
+         l_result := l_result || c_set_app_param_op || c_ser_delim
+                     || l_app_name || c_ser_delim 
+                     || l_param_name || c_ser_delim
+                     || g_serialized_settings.app_settings(l_app_name).app_params(l_param_name)  || c_ser_delim;
+         l_param_name := g_serialized_settings.app_settings(l_app_name).app_params.next(l_param_name);
+      END LOOP;    
+      $IF $$debug $THEN internal_log(logging.c_trace_level, l_intlogger, 'App params added: ' || l_result); $END
+
+      l_appender := g_serialized_settings.app_settings(l_app_name).appenders_params.first;
+      WHILE l_appender IS NOT NULL LOOP
+         l_append_param_name := g_serialized_settings.app_settings(l_app_name).appenders_params(l_appender).first;       
+         WHILE l_append_param_name IS NOT NULL LOOP
+           l_result := l_result || c_set_app_appender_param_op || c_ser_delim || l_app_name || c_ser_delim
+                       || l_appender || c_ser_delim
+                       || l_append_param_name || c_ser_delim
+                       || g_serialized_settings.app_settings(l_app_name).appenders_params(l_appender)(l_append_param_name)  || c_ser_delim;
+
+           l_append_param_name := g_serialized_settings.app_settings(l_app_name).appenders_params(l_appender).next(l_append_param_name);
+         END LOOP;
+         l_appender := g_serialized_settings.app_settings(l_app_name).appenders_params.next(l_appender);
+      END LOOP;    
+      
+      l_app_name := g_serialized_settings.app_settings.next(l_app_name);
+    END LOOP;
     $IF $$debug $THEN
       internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result);
       internal_log(logging.c_info_level, l_intlogger, 'end'); 
     $END
     RETURN l_result;    
   END serialize_settings;
+  
+  /** 
+  * Function deserializes given settings to a record  
+  * @return a record containing deserialized settings.
+  */
+  FUNCTION get_deserialized_settings(x_settings IN ctx_value_type) RETURN deserialized_settings_type IS
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'get_deserialized_settings'; $END
+    l_serialized_settings deserialized_settings_type; 
+    l_operation serialization_ops_type;
+    l_logger t_logger.logger%TYPE;
+    l_log_level t_logger.log_level%TYPE;
+    l_additivity PLS_INTEGER;
+    l_appenders PLS_INTEGER;
+    l_app t_app.app%TYPE;
+    l_appender t_appender.code%TYPE;
+    l_param_name ctx_attribute_type;
+    l_param_value ctx_value_type;
+        
+    l_pos PLS_INTEGER;
+    FUNCTION get_str_val(x_str IN ctx_value_type, x_start IN PLS_INTEGER, x_pos OUT PLS_INTEGER) RETURN ctx_value_type IS
+      l_end PLS_INTEGER;
+      l_result ctx_value_type;
+    BEGIN
+      l_end := instr(x_str, c_ser_delim, x_start);
+      x_pos := l_end + CASE l_end WHEN 0 THEN 0 ELSE length(c_ser_delim) END;
+      l_result := substr(x_str, x_start, l_end - x_start);
+      $IF $$debug $THEN 
+        internal_log(logging.c_trace_level, l_intlogger, 'x_str: ' || x_str);
+        internal_log(logging.c_trace_level, l_intlogger, 'x_start: '|| x_start || ', x_end: ' || l_end || ', l_result: ' || l_result || ', x_pos: ' || x_pos);
+      $END
+      RETURN l_result;
+    END;
+      
+    FUNCTION get_int_val(x_str IN ctx_value_type, x_start IN PLS_INTEGER, x_pos OUT PLS_INTEGER) RETURN NUMBER IS
+      l_end PLS_INTEGER;
+      l_result ctx_value_type;
+    BEGIN
+      l_end := instr(x_str, c_ser_delim, x_start);
+      x_pos := l_end + CASE l_end WHEN 0 THEN 0 ELSE length(c_ser_delim) END;
+      l_result := substr(x_str, x_start, l_end - x_start);
+      $IF $$debug $THEN 
+        internal_log(logging.c_trace_level, l_intlogger, 'x_str: ' || x_str);
+        internal_log(logging.c_trace_level, l_intlogger, 'x_start: '|| x_start || ', x_end: ' || l_end || ', l_result: ' || l_result || ', x_pos: ' || x_pos); 
+      $END       
+      RETURN CAST(l_result AS NUMBER);
+    END;
+    
+  BEGIN
+    $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'start'); $END
+
+    l_pos := 1;
+    LOOP    
+      l_operation := get_str_val(x_settings, l_pos, l_pos);
+      EXIT WHEN l_operation IS NULL;
+      
+      CASE l_operation
+      WHEN c_set_logger_op THEN
+        l_logger := get_str_val(x_settings, l_pos, l_pos);
+        l_appenders :=  get_int_val(x_settings, l_pos, l_pos);
+        l_log_level := get_str_val(x_settings, l_pos, l_pos);
+        l_additivity := get_int_val(x_settings, l_pos, l_pos);
+        IF l_log_level IS NOT NULL THEN
+          set_serialized_level(x_logger_name => l_logger, x_log_level => l_log_level);
+        END IF;
+        IF l_additivity IS NOT NULL THEN
+          set_serialized_additivity(x_logger_name => l_logger, x_additivity => int_to_bool(l_additivity));
+        END IF;
+        -- TODO: remove select (add_appender should accept a code)
+        FOR l_row IN (SELECT a.appender FROM t_appender a WHERE bitand(a.code, l_appenders) = a.code) LOOP
+          add_serialized_appender(x_logger_name => l_logger, x_appender => l_row.appender);
+        END LOOP;
+      WHEN c_set_app_param_op THEN
+        l_app := get_str_val(x_settings, l_pos, l_pos);
+        l_param_name := get_str_val(x_settings, l_pos, l_pos);
+        l_param_value := get_str_val(x_settings, l_pos, l_pos);
+        set_serialized_parameter(x_app => l_app, x_param_name => l_param_name, x_param_value => l_param_value);       
+      WHEN c_set_app_appender_param_op THEN
+        l_app := get_str_val(x_settings, l_pos, l_pos);
+        l_appender := get_int_val(x_settings, l_pos, l_pos);
+        l_param_name := get_str_val(x_settings, l_pos, l_pos);
+        l_param_value := get_str_val(x_settings, l_pos, l_pos);
+        set_serialized_parameter(x_app => l_app, x_param_name => l_param_name, x_param_value => l_param_value);       
+      END CASE;
+    END LOOP;
+
+    $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'end'); $END
+    RETURN g_serialized_settings;
+  END get_deserialized_settings;
   
   /** Procedure shows serialized settings. */
   PROCEDURE show_serialized_settings IS
@@ -2192,6 +2314,65 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'end'); $END
   END show_serialized_settings;   
 
+  /** Procedure set sets given settings in the current session by calling set_session* methods. 
+  * @param x_settings Deserialized settings.
+  */
+  PROCEDURE set_session_settings(x_settings IN deserialized_settings_type) IS 
+    $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'set_session_settings'; $END
+    l_logger     t_logger.logger%TYPE;
+    l_app        t_app.app%TYPE;
+    l_appender   t_appender.code%TYPE;
+    l_param_name ctx_attribute_type;
+  BEGIN
+    
+    -- set loggers
+    l_logger := x_settings.loggers.first;
+    WHILE l_logger IS NOT NULL LOOP
+      IF x_settings.loggers(l_logger).log_level IS NOT NULL THEN 
+        set_session_level(x_logger_name => l_logger, x_log_level => x_settings.loggers(l_logger).log_level);
+      END IF;
+      IF x_settings.loggers(l_logger).log_level IS NOT NULL THEN 
+        set_session_additivity(x_logger_name => l_logger, 
+                               x_additivity => int_to_bool(x_settings.loggers(l_logger).additivity));
+      END IF;
+
+      --TODO: remove select - use code
+      FOR l_row IN (SELECT a.appender FROM t_appender a WHERE bitand(a.code, x_settings.loggers(l_logger).enabled_appenders) = a.code) LOOP
+        add_session_appender(x_logger_name => l_logger, x_appender => l_row.appender);
+      END LOOP;
+      l_logger :=  x_settings.loggers.next(l_logger);
+    END LOOP;
+     
+    -- set app params
+    l_app := x_settings.app_settings.first;
+    WHILE l_app IS NOT NULL LOOP
+      l_param_name := x_settings.app_settings(l_app).app_params.first;
+      WHILE l_param_name IS NOT NULL LOOP
+          set_session_parameter(x_app => l_app,
+                                x_param_name => l_param_name, 
+                                x_param_value => x_settings.app_settings(l_app).app_params(l_param_name));
+        l_param_name := x_settings.app_settings(l_app).app_params.next(l_param_name);
+      END LOOP;
+      
+
+      l_appender := g_serialized_settings.app_settings(l_app).appenders_params.first;
+      WHILE l_appender IS NOT NULL LOOP
+        l_param_name := g_serialized_settings.app_settings(l_app).appenders_params(l_appender).first;       
+        WHILE l_param_name IS NOT NULL LOOP
+          set_session_appender_param(x_app => l_app,
+                                     x_appender =>  l_appender,
+                                     x_parameter_name => l_param_name,
+                                     x_parameter_value => g_serialized_settings.app_settings(l_app).appenders_params(l_appender)(l_param_name));
+          l_param_name := g_serialized_settings.app_settings(l_app).appenders_params(l_appender).next(l_param_name);
+        END LOOP;
+          
+        l_appender := g_serialized_settings.app_settings(l_app).appenders_params.next(l_appender);
+      END LOOP;
+
+      l_app :=  x_settings.app_settings.next(l_app);
+    END LOOP;
+  END set_session_settings;
+  
   /**
   * Procedure applies requested session settings for current session and given application.
   * @param x_app Application.
@@ -2199,6 +2380,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
   PROCEDURE use_requested_session_settings(x_app IN t_app.app%TYPE) IS 
     $IF $$debug $THEN l_intlogger t_logger.logger%TYPE := 'use_requested_session_settings'; $END
     l_settings ctx_value_type;
+    l_deserialized_settings deserialized_settings_type; 
   BEGIN
     $IF $$debug $THEN 
       internal_log(logging.c_info_level, l_intlogger, 'start');
@@ -2215,8 +2397,12 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     -- if there have been some settings requested, apply them to current session
     IF l_settings IS NOT NULL THEN
       copy_global_to_session(x_app => x_app);
-      --TODO: deserialize & apply settings
+      l_deserialized_settings := get_deserialized_settings(l_settings);
+      set_session_settings(l_deserialized_settings);
       set_session_ctx_usage(x_usage => true);
+      
+      -- clear the settings from context to not be applied multiple times
+      set_context_rac_aware(c_modify_session_ctx, g_session_identifier, NULL, c_global_flag);      
     END IF;      
     $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'end'); $END
   END use_requested_session_settings;
@@ -3470,7 +3656,7 @@ CREATE OR REPLACE PACKAGE BODY logging IS
     clear_all_context_rac_aware(c_logger_appenders_ctx(c_session_flag), c_session_flag);
     clear_all_context_rac_aware(c_logger_levels_ctx(c_session_flag), c_session_flag);
     clear_all_context_rac_aware(c_logger_names_ctx(c_session_flag), c_session_flag);
-    clear_all_context_rac_aware(c_parameters_ctx(c_global_flag), c_session_flag);
+    clear_all_context_rac_aware(c_parameters_ctx(c_session_flag), c_session_flag);
     $IF $$debug $THEN internal_log(logging.c_info_level, l_intlogger, 'end'); $END
   END purge_session_contexts;
 

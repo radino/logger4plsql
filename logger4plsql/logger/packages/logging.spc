@@ -59,6 +59,21 @@ CREATE OR REPLACE PACKAGE logging IS
     $ELSE FALSE
     $END;
 
+  /** Type for serialization operation: e.g. set logger parameters, set appender parameter, etc. */
+  SUBTYPE serialization_ops_type IS VARCHAR2(5);
+  
+  /** Operation for setting logger parameters */
+  c_set_logger_op CONSTANT serialization_ops_type := 'SL';
+  
+  /** Operation for setting application parameters */
+  c_set_app_param_op CONSTANT serialization_ops_type := 'SAP';
+  
+  /** Operation for setting application appender parameters */
+  c_set_app_appender_param_op CONSTANT serialization_ops_type := 'SAAP';
+  
+  /** Item delimiter in serialized settings */
+  c_ser_delim CONSTANT VARCHAR2(3) := '#!';
+
   /** Type for settings of all appenders. */
   TYPE appenders_params_type IS TABLE OF appender_params_type INDEX BY PLS_INTEGER; -- t_appender.code;
 
@@ -70,23 +85,6 @@ CREATE OR REPLACE PACKAGE logging IS
     enabled_appenders  t_logger.appenders%TYPE,
     app                t_app_appender.app%TYPE,
     appenders_params   appenders_params_type -- currently not used
-  );
-  
-  /** Type used for serialization of loggers parameters */
-  TYPE logger_settings_type IS RECORD (
-     enabled_appenders  t_logger.appenders%TYPE,
-     log_level          t_logger.log_level%TYPE,
-     additivity         t_logger.additivity%TYPE       
-  );
-  
-  /** Collection type of loggers used for serialization of loggers parameters */
-  TYPE logger_settings_col_type IS TABLE OF logger_settings_type INDEX BY t_logger.logger%TYPE;
-  
-  /** Type for serialized logging settings. */
-  TYPE serialized_settings_type IS RECORD (
-     loggers          logger_settings_col_type,
-     app_params       appender_params_type,
-     appenders_params appenders_params_type
   );
 
   /** Log level ALL. */
@@ -138,6 +136,23 @@ CREATE OR REPLACE PACKAGE logging IS
     -- methods
     -- internal debugger private methods
     $IF $$debug $THEN
+
+    TYPE logger_settings_type IS RECORD (
+       enabled_appenders  t_logger.appenders%TYPE,
+       log_level          t_logger.log_level%TYPE,
+       additivity         t_logger.additivity%TYPE       
+    );
+    TYPE logger_settings_col_type IS TABLE OF logger_settings_type INDEX BY t_logger.logger%TYPE;
+    TYPE app_settings_type IS RECORD (
+       app_params       appender_params_type,
+       appenders_params appenders_params_type
+    );
+    TYPE app_settings_col_type IS TABLE OF app_settings_type INDEX BY t_app.app%TYPE;
+    TYPE deserialized_settings_type IS RECORD (
+       loggers          logger_settings_col_type,
+       app_settings     app_settings_col_type
+    );
+
     PROCEDURE internal_log(x_level    IN t_log_level.log_level%TYPE,
                          x_logger   IN t_logger.logger%TYPE,
                          x_message  IN message_type,
@@ -145,7 +160,8 @@ CREATE OR REPLACE PACKAGE logging IS
     PROCEDURE init_log_level_severities;
     $END
     FUNCTION bool_to_int(x_boolean IN BOOLEAN) RETURN NUMBER;
-    PROCEDURE clear_all_context_rac_aware(x_namespace IN ctx_namespace_type);
+    PROCEDURE clear_all_context_rac_aware(x_namespace IN ctx_namespace_type,
+                                        x_visibility IN visibility_type);
     FUNCTION dequeue_from_cyclic_buffer RETURN VARCHAR2;
     PROCEDURE enqueue_into_cyclic_buffer(x_app IN VARCHAR2, x_message IN message_type);
     FUNCTION format_call_stack RETURN VARCHAR2;
@@ -171,6 +187,7 @@ CREATE OR REPLACE PACKAGE logging IS
                                  x_param_name IN t_param.param_name%TYPE) RETURN t_param.param_value%TYPE;
     FUNCTION get_current_used_appenders(x_logger_name IN t_logger.logger%TYPE) RETURN t_logger.appenders%TYPE;
     FUNCTION get_current_used_level(x_logger_name IN t_logger.logger%TYPE) RETURN t_logger.log_level%TYPE;
+    FUNCTION get_deserialized_settings(x_settings IN ctx_value_type) RETURN deserialized_settings_type;
     FUNCTION get_layout(x_app        IN t_app_appender.app%TYPE,
                       x_appender   IN t_app_appender.appender%TYPE,
                       x_visibility IN visibility_type DEFAULT c_global_flag)
@@ -187,7 +204,7 @@ CREATE OR REPLACE PACKAGE logging IS
     PROCEDURE init_loggers(x_visibility IN visibility_type DEFAULT c_global_flag,
                            x_app        IN t_app.app%TYPE DEFAULT NULL);
     PROCEDURE init_params(x_visibility IN visibility_type DEFAULT c_global_flag,
-                          x_app        IN t_param.app%%TYPE DEFAULT NULL);
+                          x_app        IN t_param.app%TYPE DEFAULT NULL);
     PROCEDURE init_session_identifier;
     PROCEDURE init_user_app;
     FUNCTION int_to_bool(x_number IN NUMBER) RETURN BOOLEAN;
@@ -220,10 +237,11 @@ CREATE OR REPLACE PACKAGE logging IS
                           o_app        OUT VARCHAR2,
                           x_method     IN VARCHAR2 DEFAULT NULL,
                           x_call_stack IN VARCHAR2 DEFAULT dbms_utility.format_call_stack());
-    FUNCTION serialize_settings RETURN ctx_value_type;7
+    FUNCTION serialize_settings RETURN ctx_value_type;
     PROCEDURE set_context_rac_aware(x_namespace      IN ctx_namespace_type,
                                     x_attribute      IN ctx_attribute_type,
-                                    x_value          IN ctx_value_type);
+                                    x_value          IN ctx_value_type,
+                                    x_visibility     IN visibility_type);
     PROCEDURE send_buffer(x_app IN t_app_appender.app%TYPE);
     PROCEDURE unimplemented;
     PROCEDURE use_requested_session_settings(x_app IN t_app.app%TYPE);
@@ -611,6 +629,11 @@ CREATE OR REPLACE PACKAGE logging IS
 
   /** Procedure shows serialized settings. */
   PROCEDURE show_serialized_settings;
+
+  /**
+  * Procedure clears all serialized settings.
+  */  
+  PROCEDURE clear_serialized_settings;
 
   /**
   * Procedure adds given appender to given logger and sets additivity flag for the logger in serialized settings.
