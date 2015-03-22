@@ -77,35 +77,35 @@ create or replace package logging is
   type logger_type is record(
     always_from_ctx    ctx_boolean,
     logger             t_logger.logger%type,
-    log_level_severity t_log_level.severity%type,
+    log_level          t_logger.log_level%type,
     enabled_appenders  t_logger.appenders%type,
     app                t_app_appender.app%type,
     appenders_params   appenders_params_type -- currently not used
     );
+    
+  /** Log level ALL: The ALL has the lowest possible rank and is intended to turn on all logging. */
+  c_all_level constant t_logger.log_level%type := -99999;
 
-  /** Log level ALL. */
-  c_all_level constant t_log_level.log_level%type := 'ALL';
+  /** Log level TRACE: The TRACE Level designates finer-grained informational events than the DEBUG */
+  c_trace_level constant t_logger.log_level%type := 10000;
 
-  /** Log level TRACE. */
-  c_trace_level constant t_log_level.log_level%type := 'TRACE';
+  /** Log level DEBUG: The DEBUG Level designates fine-grained informational events that are most useful to debug an application. */
+  c_debug_level constant t_logger.log_level%type := 20000;
 
-  /** Log level DEBUG. */
-  c_debug_level constant t_log_level.log_level%type := 'DEBUG';
+  /** Log level INFO: The INFO level designates informational messages that highlight the progress of the application at coarse-grained level. */
+  c_info_level constant t_logger.log_level%type := 30000;
 
-  /** Log level INFO. */
-  c_info_level constant t_log_level.log_level%type := 'INFO';
+  /** Log level WARN: The WARN level designates potentially harmful situations. */
+  c_warn_level constant t_logger.log_level%type := 40000;
 
-  /** Log level WARN. */
-  c_warn_level constant t_log_level.log_level%type := 'WARN';
+  /** Log level ERROR: The ERROR level designates error events that might still allow the application to continue running. */
+  c_error_level constant t_logger.log_level%type := 50000;
 
-  /** Log level ERROR. */
-  c_error_level constant t_log_level.log_level%type := 'ERROR';
+  /** Log level FATAL: The FATAL level designates very severe error events that will presumably lead the application to abort. */
+  c_fatal_level constant t_logger.log_level%type := 60000;
 
-  /** Log level FATAL. */
-  c_fatal_level constant t_log_level.log_level%type := 'FATAL';
-
-  /** Log level OFF. */
-  c_off_level constant t_log_level.log_level%type := 'OFF';
+  /** Log level OFF: The OFF has the highest possible rank and is intended to turn off logging. */
+  c_off_level constant t_logger.log_level%type := 99999;
 
   /** TABLE appender. */
   c_table_appender constant t_appender.code%type := 1;
@@ -118,7 +118,7 @@ create or replace package logging is
 
   -- these elements are defined only if internal debugging is set to TRUE
   $if $$debug $then
-  g_internal_log_level t_log_level.log_level%type := c_trace_level;
+  g_internal_log_level t_logger.log_level%type := c_trace_level;
   g_internal_appenders pls_integer := 2;
   $end
 
@@ -146,7 +146,7 @@ create or replace package logging is
     loggers      logger_settings_col_type,
     app_settings app_settings_col_type);
 
-  procedure internal_log(x_level    in t_log_level.log_level%type,
+  procedure internal_log(x_level    in t_logger.log_level%type,
                          x_logger   in t_logger.logger%type,
                          x_message  in message_type,
                          x_appender in pls_integer default g_internal_appenders);

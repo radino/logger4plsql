@@ -49,14 +49,6 @@ create or replace package body logging is
     buffer    mail_table_type -- buffer containg logs
     );
 
-  -- these elements are defined only if internal debugging is set to TRUE
-  $if $$debug $then
-  /** Type for severity collection for the internal debugging. */
-  type log_level_severity_type is table of pls_integer index by t_log_level.log_level%type;
-  /** Collection for severities for the internal debugging. */
-  g_log_level_severities log_level_severity_type;
-  $end
-
   -- these elements are public when unit testing precompiler option is set to TRUE
   -- therefore they cannot be defined in the body
   $if not $$unit_test or $$unit_test is null $then
@@ -108,9 +100,6 @@ create or replace package body logging is
 
   /** Names of global and session contexts containing set log levels for loggers. */
   c_logger_levels_ctx constant context_list_type := context_list_type('CTX_LOGGER_LEV_G', 'CTX_LOGGER_LEV_L');
-
-  /** Name of global context containing severities for log levels. */
-  c_global_levels_ctx constant ctx_namespace_type := 'CTX_LOGGER_LEVELS_G';
 
   /** Name of global context containing settings for a session. */
   c_modify_session_ctx constant ctx_namespace_type := 'CTX_LOGGER_MODIFY_SESSION_G';
@@ -181,19 +170,6 @@ create or replace package body logging is
   /** A variable for builtding serialized settings */
   g_serialized_settings deserialized_settings_type;
 
-   -- these elements are defined only if internal debugging is set to TRUE
-  $if $$debug $then
-  /**
-  * Procedure initializes log level severities for internal debugging
-  */
-  procedure init_log_level_severities is    
-  begin
-     for l_row in (select ll.log_level, ll.severity from t_log_level ll) loop
-       g_log_level_severities(l_row.log_level) := l_row.severity;
-     end loop;  
-  end init_log_level_severities;
-  $end
-  
   -- these elements are defined only if internal debugging is set to TRUE
   $if $$debug $then
   /**
@@ -203,13 +179,13 @@ create or replace package body logging is
   * @param x_message Message.
   * @param x_appender Binary encoded appenders (1 - table, 2 - dbms_output)
   */
-  procedure internal_log(x_level    in t_log_level.log_level%type,
+  procedure internal_log(x_level    in t_logger.log_level%type,
                          x_logger   in t_logger.logger%type,
                          x_message  in message_type,
                          x_appender in pls_integer default g_internal_appenders) is
     pragma autonomous_transaction;
   begin 
-    if g_log_level_severities(g_internal_log_level) > g_log_level_severities(x_level) then
+    if g_internal_log_level > x_level then
        return;
     end if;
     
@@ -659,6 +635,38 @@ create or replace package body logging is
   end get_app;
 
   /**
+  * Function returns level name for given level.
+  * @param x_log_level
+  * @return Log level name
+  */
+  function get_level_name(x_log_level in t_logger.log_level%type) return varchar2 is
+    $if $$debug $then l_intlogger t_logger.logger%type := 'get_level_name'; $end
+    l_result varchar2(10);
+  begin
+    $if $$debug $then 
+      internal_log(logging.c_info_level, l_intlogger, 'start'); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_log_level: ' || x_log_level); 
+    $end
+    
+    l_result := CASE x_log_level 
+                WHEN c_all_level THEN 'ALL'
+                WHEN c_trace_level THEN 'TRACE'
+                WHEN c_debug_level THEN 'DEBUG'
+                WHEN c_info_level THEN 'INFO'
+                WHEN c_warn_level THEN 'WARN'
+                WHEN c_error_level THEN 'ERROR'
+                WHEN c_fatal_level THEN 'FATAL'
+                WHEN c_off_level THEN 'OFF'
+                ELSE 'CUSTOM' END;              
+    
+    $if $$debug $then 
+      internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result); 
+      internal_log(logging.c_info_level, l_intlogger, 'end'); 
+    $end
+    return l_result;
+  end get_level_name;
+
+  /**
   * Function returns call stack (without functions of this package).
   * @return Call stack.
   */
@@ -804,38 +812,6 @@ create or replace package body logging is
     $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'result (end): false'); $end
     return false;
   end is_initialized;
-
-  /**
-  * Procedure initializes a context for log levels. Lazy initialization is used.
-  */
-  procedure init_levels is
-    $if $$debug $then l_intlogger t_logger.logger%type := 'init_levels'; $end
-  begin
-    $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'start'); $end  
-  
-    $if dbms_db_version.version >= 11 $then pragma inline('is_initialized',  'YES'); $end
-    if is_initialized(c_global_levels_ctx) then
-      $if $$debug $then 
-        internal_log(logging.c_info_level, l_intlogger, 'Context already initialized');
-        internal_log(logging.c_debug_level, l_intlogger, 'end'); 
-      $end
-      return;
-    end if;
-
-    for l_row in (select ll.log_level, ll.severity
-                    from t_log_level ll) loop
-      $if $$debug $then 
-        internal_log(logging.c_trace_level, l_intlogger, 'log_level' || l_row.log_level);
-        internal_log(logging.c_trace_level, l_intlogger, 'severity' || l_row.severity);
-      $end
-      set_context_rac_aware(c_global_levels_ctx, l_row.log_level, l_row.severity, c_global_flag);
-    end loop;
-
-    $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'Context has been initialized'); $end
-    $if dbms_db_version.version >= 11 $then pragma inline('set_initialization',  'YES'); $end
-    set_initialization(c_global_levels_ctx, true, c_global_flag);
-    $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
-  end init_levels;
 
   /**
   * Procedure initializes a global or session contexts for appenders.
@@ -2547,22 +2523,6 @@ create or replace package body logging is
   end set_session_level;
 
   /**
-  * Function returns severity for given log level.
-  * @param x_level Log level.
-  * @return Severity of given log level.
-  */
-  function get_level_severity(x_level in t_log_level.log_level%type) return t_log_level.severity%type is
-    $if $$debug $then l_intlogger t_logger.logger%type := 'get_level_severity'; $end    
-  begin
-    $if $$debug $then
-      internal_log(logging.c_info_level, l_intlogger, 'start');
-      internal_log(logging.c_debug_level, l_intlogger, 'x_level: ' || x_level); 
-      internal_log(logging.c_info_level, l_intlogger, 'end');
-    $end    
-    return cast(sys_context(c_global_levels_ctx, x_level) as number);
-  end get_level_severity;
-
-  /**
   * Funtion formats given message with given layout.
   * @param x_message Message.
   * @param x_layout Layout.
@@ -2819,14 +2779,13 @@ create or replace package body logging is
     parse_stack(l_logger.logger, l_logger.app, x_method);
     l_logger.always_from_ctx := x_always_from_ctx;
     
-    $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity',  'YES'); $end
-    l_logger.log_level_severity := get_level_severity(get_current_used_level(l_logger.logger));
+    l_logger.log_level := get_current_used_level(l_logger.logger);
     $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_appenders',  'YES'); $end
     l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);
 
     $if $$debug $then 
       internal_log(logging.c_debug_level, l_intlogger, 'l_logger.always_from_ctx: ' || l_logger.always_from_ctx); 
-      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.log_level_severity: ' || l_logger.log_level_severity); 
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.log_level_severity: ' || l_logger.log_level); 
       internal_log(logging.c_debug_level, l_intlogger, 'l_logger.enabled_appenders: ' || l_logger.enabled_appenders); 
       internal_log(logging.c_info_level, l_intlogger, 'end');
     $end
@@ -2854,9 +2813,8 @@ create or replace package body logging is
     l_logger.always_from_ctx := x_always_from_ctx;
    
     $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_level',  'YES'); $end
-    $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity',  'YES'); $end
-    l_logger.log_level_severity := get_level_severity(get_current_used_level(l_logger.logger));
-    $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'l_logger.log_level_severity: ' || l_logger.log_level_severity); $end
+    l_logger.log_level := get_current_used_level(l_logger.logger);
+    $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'l_logger.log_level_severity: ' || l_logger.log_level); $end
     $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_appenders',  'YES'); $end
     l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);
     $if $$debug $then 
@@ -2887,9 +2845,8 @@ create or replace package body logging is
     $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'l_logger.logger: ' || l_logger.logger); $end
 
     $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_level',  'YES'); $end
-    $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity',  'YES'); $end
-    l_logger.log_level_severity := get_level_severity(get_current_used_level(l_logger.logger));
-    $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'l_logger.log_level_severity: ' || l_logger.log_level_severity); $end
+    l_logger.log_level := get_current_used_level(l_logger.logger);
+    $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'l_logger.log_level_severity: ' || l_logger.log_level); $end
     $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_appenders',  'YES'); $end
     l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);
     $if $$debug $then 
@@ -2919,8 +2876,7 @@ create or replace package body logging is
     l_logger.always_from_ctx := x_always_from_ctx;
     $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'l_logger.logger: ' || l_logger.logger); $end
     $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_level',  'YES'); $end
-    $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity',  'YES'); $end
-    l_logger.log_level_severity := get_level_severity(get_current_used_level(l_logger.logger));
+    l_logger.log_level := get_current_used_level(l_logger.logger);
     $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_appenders',  'YES'); $end
     l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);
     $if $$debug $then 
@@ -3071,13 +3027,13 @@ create or replace package body logging is
   */
   procedure log_smtp(x_app           in t_app_appender.app%type,
                      x_logger_name   in t_logger.logger%type,
-                     x_level         in t_log_level.log_level%type,
+                     x_level         in t_logger.log_level%type,
                      x_message       in message_type,
                      x_call_stack    in boolean,
                      x_log_backtrace in boolean) is
     $if $$debug $then l_intlogger t_logger.logger%type := 'log_smtp'; $end
     l_layout        t_app_appender.parameter_value%type;
-    l_trigger_level t_log_level.log_level%type;
+    l_trigger_level t_logger.log_level%type;
   begin
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
@@ -3109,8 +3065,7 @@ create or replace package body logging is
     l_trigger_level := get_current_appender_param(x_app, c_smtp_appender, 'TRIGGER_LEVEL');
     $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'l_trigger_level: ' || l_trigger_level);  $end
 
-    $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity',  'YES'); $end
-    if get_level_severity(x_level) >= get_level_severity(l_trigger_level) then
+    if x_level >= l_trigger_level then
       send_buffer(x_app);
     end if;
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
@@ -3127,7 +3082,7 @@ create or replace package body logging is
   */
   procedure log_stdout(x_app           in t_app_appender.app%type,
                        x_logger_name   in t_logger.logger%type,
-                       x_level         in t_log_level.log_level%type,
+                       x_level         in t_logger.log_level%type,
                        x_message       in message_type,
                        x_call_stack    in boolean,
                        x_log_backtrace in boolean) is
@@ -3171,7 +3126,7 @@ create or replace package body logging is
   */
   procedure log_table(x_app           in t_app_appender.app%type,
                       x_logger_name   in t_logger.logger%type,
-                      x_level         in t_log_level.log_level%type,
+                      x_level         in t_logger.log_level%type,
                       x_message       in message_type,
                       x_call_stack    in boolean,
                       x_log_backtrace in boolean) is
@@ -3230,7 +3185,7 @@ create or replace package body logging is
   * @param x_call_stack Flag, whether to log call stack.
   * @param x_log_backtrace Flag, whether to log backtrace.
   */
-  procedure log(x_level          in t_log_level.log_level%type,
+  procedure log(x_level          in t_logger.log_level%type,
                 x_logger         in out nocopy logger_type,
                 x_message        in message_type,
                 x_log_backtrace  in boolean,
@@ -3241,7 +3196,7 @@ create or replace package body logging is
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.logger: ' || x_logger.logger);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || x_logger.always_from_ctx);
-      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level_severity);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.app: ' || x_logger.app);
       internal_log(logging.c_debug_level, l_intlogger, 'x_level: ' || x_level);
@@ -3255,13 +3210,11 @@ create or replace package body logging is
       $if dbms_db_version.version >= 11 $then pragma inline('use_requested_session_settings',  'YES'); $end
       use_requested_session_settings(x_logger.app);      
   
-      $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity',  'YES'); $end
-      x_logger.log_level_severity := get_level_severity(get_current_used_level(x_logger.logger));
-      $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level_severity); $end
+      x_logger.log_level := get_current_used_level(x_logger.logger);
+      $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level); $end
     end if;
     
-    $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity',  'YES'); $end
-    if x_logger.log_level_severity > get_level_severity(x_level) then
+    if x_logger.log_level > x_level then
       $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'insignificant message.');  $end
       return;
     end if;
@@ -3408,7 +3361,7 @@ create or replace package body logging is
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.logger: ' || x_logger.logger);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || x_logger.always_from_ctx);
-      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level_severity);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.app: ' || x_logger.app);
     $end
@@ -3418,13 +3371,11 @@ create or replace package body logging is
       $if dbms_db_version.version >= 11 $then pragma inline('use_requested_session_settings',  'YES'); $end
       use_requested_session_settings(x_logger.app);      
       
-      $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity', 'YES'); $end
       $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_level', 'YES'); $end
-      x_logger.log_level_severity := get_level_severity(get_current_used_level(x_logger.logger));
+      x_logger.log_level := get_current_used_level(x_logger.logger);
     end if;
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
-    $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity', 'YES'); $end
-    return x_logger.log_level_severity <= get_level_severity(c_trace_level);
+    return x_logger.log_level <= c_trace_level;
   end is_trace_enabled;
 
   /**
@@ -3441,7 +3392,7 @@ create or replace package body logging is
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.logger: ' || x_logger.logger);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || x_logger.always_from_ctx);
-      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level_severity);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.app: ' || x_logger.app);
     $end
@@ -3451,14 +3402,12 @@ create or replace package body logging is
       $if dbms_db_version.version >= 11 $then pragma inline('use_requested_session_settings',  'YES'); $end
       use_requested_session_settings(x_logger.app);      
 
-      $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity', 'YES'); $end
       $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_level', 'YES'); $end
-      x_logger.log_level_severity := get_level_severity(get_current_used_level(x_logger.logger));
-      $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level_severity); $end
+      x_logger.log_level := get_current_used_level(x_logger.logger);
+      $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level); $end
     end if;
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
-    $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity', 'YES'); $end
-    return x_logger.log_level_severity <= get_level_severity(c_debug_level);
+    return x_logger.log_level <= c_debug_level;
   end is_debug_enabled;
 
   /**
@@ -3475,7 +3424,7 @@ create or replace package body logging is
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.logger: ' || x_logger.logger);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || x_logger.always_from_ctx);
-      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level_severity);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.app: ' || x_logger.app);
     $end
@@ -3485,14 +3434,12 @@ create or replace package body logging is
       $if dbms_db_version.version >= 11 $then pragma inline('use_requested_session_settings',  'YES'); $end
       use_requested_session_settings(x_logger.app);      
       
-      $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity', 'YES'); $end
       $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_level', 'YES'); $end
-      x_logger.log_level_severity := get_level_severity(get_current_used_level(x_logger.logger));
-      $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level_severity); $end
+      x_logger.log_level := get_current_used_level(x_logger.logger);
+      $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level); $end
     end if;
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
-    $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity', 'YES'); $end
-    return x_logger.log_level_severity <= get_level_severity(c_info_level);
+    return x_logger.log_level <= c_info_level;
   end is_info_enabled;
 
   /**
@@ -3509,7 +3456,7 @@ create or replace package body logging is
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.logger: ' || x_logger.logger);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || x_logger.always_from_ctx);
-      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level_severity);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.app: ' || x_logger.app);
     $end
@@ -3519,14 +3466,12 @@ create or replace package body logging is
       $if dbms_db_version.version >= 11 $then pragma inline('use_requested_session_settings',  'YES'); $end
       use_requested_session_settings(x_logger.app);      
 
-      $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity', 'YES'); $end
       $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_level', 'YES'); $end
-      x_logger.log_level_severity := get_level_severity(get_current_used_level(x_logger.logger));
-      $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level_severity); $end
+      x_logger.log_level := get_current_used_level(x_logger.logger);
+      $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level); $end
     end if;
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
-    $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity', 'YES'); $end
-    return x_logger.log_level_severity <= get_level_severity(c_warn_level);
+    return x_logger.log_level <= c_warn_level;
   end is_warn_enabled;
 
   /**
@@ -3543,7 +3488,7 @@ create or replace package body logging is
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.logger: ' || x_logger.logger);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || x_logger.always_from_ctx);
-      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level_severity);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.app: ' || x_logger.app);
     $end
@@ -3553,14 +3498,12 @@ create or replace package body logging is
       $if dbms_db_version.version >= 11 $then pragma inline('use_requested_session_settings',  'YES'); $end
       use_requested_session_settings(x_logger.app);      
 
-      $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity', 'YES'); $end
       $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_level', 'YES'); $end
-      x_logger.log_level_severity := get_level_severity(get_current_used_level(x_logger.logger));
-      $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level_severity); $end
+      x_logger.log_level := get_current_used_level(x_logger.logger);
+      $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level: ' || x_logger.log_level); $end
     end if;
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
-    $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity', 'YES'); $end
-    return x_logger.log_level_severity <= get_level_severity(c_error_level);
+    return x_logger.log_level <= c_error_level;
   end is_error_enabled;
 
   /**
@@ -3577,7 +3520,7 @@ create or replace package body logging is
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.logger: ' || x_logger.logger);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || x_logger.always_from_ctx);
-      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level_severity);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.app: ' || x_logger.app);
     $end
@@ -3587,14 +3530,12 @@ create or replace package body logging is
       $if dbms_db_version.version >= 11 $then pragma inline('use_requested_session_settings',  'YES'); $end
       use_requested_session_settings(x_logger.app);      
       
-      $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity', 'YES'); $end
       $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_level', 'YES'); $end
-      x_logger.log_level_severity := get_level_severity(get_current_used_level(x_logger.logger));
-      $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level_severity); $end
+      x_logger.log_level := get_current_used_level(x_logger.logger);
+      $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level); $end
     end if;
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
-    $if dbms_db_version.version >= 11 $then pragma inline('get_level_severity', 'YES'); $end
-    return x_logger.log_level_severity <= get_level_severity(c_fatal_level);
+    return x_logger.log_level <= c_fatal_level;
   end is_fatal_enabled;
 
   /** Procedure purges all global contexts used by logging */
@@ -3612,7 +3553,6 @@ create or replace package body logging is
     clear_all_context_rac_aware(c_additivity_ctx(c_global_flag), c_global_flag);
     clear_all_context_rac_aware(c_global_appenders_ctx, c_global_flag);
     clear_all_context_rac_aware(c_logger_levels_ctx(c_global_flag), c_global_flag);
-    clear_all_context_rac_aware(c_global_levels_ctx, c_global_flag);
     clear_all_context_rac_aware(c_logger_names_ctx(c_global_flag), c_global_flag);
     clear_all_context_rac_aware(c_parameters_ctx(c_global_flag), c_global_flag);
     clear_all_context_rac_aware(c_global_user_app_ctx, c_global_flag);
@@ -3761,7 +3701,6 @@ create or replace package body logging is
 begin
  -- these elements are defined only if internal debugging is set to true
   $if $$debug $then  
-    init_log_level_severities();
     internal_log(logging.c_info_level, 'initialization', 'start');
   $end
   
@@ -3773,8 +3712,6 @@ begin
   init_user_app;
   $if dbms_db_version.version >= 11 $then pragma inline('init_params', 'YES'); $end
   init_params(c_global_flag);
-  $if dbms_db_version.version >= 11 $then pragma inline('init_levels', 'YES'); $end
-  init_levels;
   $if dbms_db_version.version >= 11 $then pragma inline('init_appenders', 'YES'); $end
   init_appenders(c_global_flag);
   $if dbms_db_version.version >= 11 $then pragma inline('init_loggers', 'YES'); $end
