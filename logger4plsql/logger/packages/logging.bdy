@@ -657,7 +657,7 @@ create or replace package body logging is
                 WHEN c_error_level THEN 'ERROR'
                 WHEN c_fatal_level THEN 'FATAL'
                 WHEN c_off_level THEN 'OFF'
-                ELSE 'CUSTOM' END;              
+                ELSE 'CUST('||x_log_level||')' END;              
     
     $if $$debug $then 
       internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result); 
@@ -2527,13 +2527,13 @@ create or replace package body logging is
   * @param x_message Message.
   * @param x_layout Layout.
   * @param x_logger_name Logger name.
-  * @param x_level Log level.
+  * @param x_level Log level name.
   * @return Formated message.
   */
   function format_message(x_message     in message_type,
                           x_layout      in t_app_appender.parameter_value%type,
                           x_logger_name in t_logger.logger%type,
-                          x_level       in t_logger.log_level%type) return varchar2 is
+                          x_level       in t_log.log_level%type) return varchar2 is
     $if $$debug $then l_intlogger t_logger.logger%type := 'format_message'; $end
     l_message t_log.message%type;
   begin
@@ -3049,7 +3049,7 @@ create or replace package body logging is
     $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'l_layout: ' || l_layout);  $end
 
     $if dbms_db_version.version >= 11 $then pragma inline('enqueue_into_cyclic_buffer',  'YES'); $end
-    enqueue_into_cyclic_buffer(x_app, format_message(x_message, l_layout, x_logger_name, x_level) || c_nl);
+    enqueue_into_cyclic_buffer(x_app, format_message(x_message, l_layout, x_logger_name, get_level_name(x_level)) || c_nl);
 
     if x_log_backtrace then
       $if dbms_db_version.version >= 11 $then pragma inline('enqueue_into_cyclic_buffer',  'YES'); $end
@@ -3103,7 +3103,7 @@ create or replace package body logging is
     l_layout := get_current_layout(x_app, c_dbms_output_appender);
     $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'l_layout: ' || l_layout);  $end
 
-    dbms_output.put_line(format_message(x_message, l_layout, x_logger_name, x_level));
+    dbms_output.put_line(format_message(x_message, l_layout, x_logger_name, get_level_name(x_level)));
 
     if x_log_backtrace then
       dbms_output.put_line(dbms_utility.format_error_stack || dbms_utility.format_error_backtrace);
@@ -3137,6 +3137,7 @@ create or replace package body logging is
     l_timestamp        t_log.log_date%type := systimestamp;
     l_layout           t_app_appender.parameter_value%type;
     l_formated_message t_log.message%type;
+    l_level_name       t_log.log_level%TYPE;
   begin
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
@@ -3160,7 +3161,9 @@ create or replace package body logging is
       l_call_stack := format_call_stack();
     end if;
 
-    l_formated_message := format_message(x_message, l_layout, x_logger_name, x_level);
+    l_level_name := get_level_name(x_level);
+
+    l_formated_message := format_message(x_message, l_layout, x_logger_name, l_level_name);
     $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'l_formated_message: ' || l_formated_message);  $end
 
     insert into t_log
@@ -3172,24 +3175,24 @@ create or replace package body logging is
        l_timestamp,
        l_call_stack,
        l_backtrace,
-       x_level);
+       l_level_name);
     commit;
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
   end log_table;
 
   /**
   * Procedure logs given message.
-  * @param x_app Application name
   * @param x_logger Logger settings.
+  * @param x_level Log level.
   * @param x_message Message.
   * @param x_call_stack Flag, whether to log call stack.
   * @param x_log_backtrace Flag, whether to log backtrace.
   */
-  procedure log(x_level          in t_logger.log_level%type,
-                x_logger         in out nocopy logger_type,
+  procedure log(x_logger         in out nocopy logger_type,
+                x_log_level      in t_logger.log_level%type,
                 x_message        in message_type,
-                x_log_backtrace  in boolean,
-                x_log_call_stack in boolean) is
+                x_log_backtrace  in boolean default true,
+                x_log_call_stack in boolean default true) is
     $if $$debug $then l_intlogger t_logger.logger%type := 'log'; $end
   begin
     $if $$debug $then
@@ -3199,7 +3202,7 @@ create or replace package body logging is
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.app: ' || x_logger.app);
-      internal_log(logging.c_debug_level, l_intlogger, 'x_level: ' || x_level);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_level: ' || x_log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'x_message: ' || x_message); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_call_stack: ' || bool_to_int(x_log_call_stack)); 
       internal_log(logging.c_debug_level, l_intlogger, 'x_log_backtrace: ' || bool_to_int(x_log_backtrace)); 
@@ -3214,7 +3217,7 @@ create or replace package body logging is
       $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level); $end
     end if;
     
-    if x_logger.log_level > x_level then
+    if x_logger.log_level > x_log_level then
       $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'insignificant message.');  $end
       return;
     end if;
@@ -3230,7 +3233,7 @@ create or replace package body logging is
     if bitand(x_logger.enabled_appenders, c_table_appender) > 0 then
       $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'table appender enabled.');  $end
       $if dbms_db_version.version >= 11 $then pragma inline('log_table',  'YES'); $end
-      log_table(x_logger.app, x_logger.logger, x_level, x_message, x_log_call_stack, x_log_backtrace);
+      log_table(x_logger.app, x_logger.logger, x_log_level, x_message, x_log_call_stack, x_log_backtrace);
     end if;
 
     $if dbms_db_version.version >= 11 $then pragma inline('bitand', 'YES'); $end
@@ -3238,7 +3241,7 @@ create or replace package body logging is
     if bitand(x_logger.enabled_appenders, c_dbms_output_appender) > 0 then
       $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'dbms_output appender enabled.');  $end
       $if dbms_db_version.version >= 11 $then pragma inline('log_stdout',  'YES'); $end
-      log_stdout(x_logger.app, x_logger.logger, x_level, x_message, x_log_call_stack, x_log_backtrace);
+      log_stdout(x_logger.app, x_logger.logger, x_log_level, x_message, x_log_call_stack, x_log_backtrace);
     end if;
 
     $if dbms_db_version.version >= 11 $then pragma inline('bitand', 'YES'); $end
@@ -3246,7 +3249,7 @@ create or replace package body logging is
     if bitand(x_logger.enabled_appenders, c_smtp_appender) > 0 then
       $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'smtp appender enabled.');  $end
       $if dbms_db_version.version >= 11 $then pragma inline('log_smtp',  'YES'); $end
-      log_smtp(x_logger.app, x_logger.logger, x_level, x_message, x_log_call_stack, x_log_backtrace);
+      log_smtp(x_logger.app, x_logger.logger, x_log_level, x_message, x_log_call_stack, x_log_backtrace);
     end if;
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
   end log;
@@ -3264,7 +3267,7 @@ create or replace package body logging is
                   x_log_call_stack in boolean default true) is
   begin
     $if dbms_db_version.version >= 11 $then pragma inline('log', 'YES'); $end
-    log(c_trace_level, x_logger, x_message, x_log_backtrace, x_log_call_stack);
+    log(x_logger, c_trace_level, x_message, x_log_backtrace, x_log_call_stack);
   end trace;
 
   /**
@@ -3280,7 +3283,7 @@ create or replace package body logging is
                  x_log_call_stack in boolean default true) is
   begin
     $if dbms_db_version.version >= 11 $then pragma inline('log', 'YES'); $end
-    log(c_info_level, x_logger, x_message, x_log_backtrace, x_log_call_stack);
+    log(x_logger, c_info_level, x_message, x_log_backtrace, x_log_call_stack);
   end info;
 
   /**
@@ -3296,7 +3299,7 @@ create or replace package body logging is
                   x_log_call_stack in boolean default true) is
   begin
     $if dbms_db_version.version >= 11 $then pragma inline('log', 'YES'); $end
-    log(c_debug_level, x_logger, x_message, x_log_backtrace, x_log_call_stack);
+    log(x_logger, c_debug_level, x_message, x_log_backtrace, x_log_call_stack);
   end debug;
 
   /**
@@ -3312,7 +3315,7 @@ create or replace package body logging is
                  x_log_call_stack in boolean default true) is
   begin
     $if dbms_db_version.version >= 11 $then pragma inline('log', 'YES'); $end
-    log(c_warn_level, x_logger, x_message, x_log_backtrace, x_log_call_stack);
+    log(x_logger, c_warn_level, x_message, x_log_backtrace, x_log_call_stack);
   end warn;
 
   /**
@@ -3328,7 +3331,7 @@ create or replace package body logging is
                   x_log_call_stack in boolean default true) is
   begin
     $if dbms_db_version.version >= 11 $then pragma inline('log', 'YES'); $end
-    log(c_error_level, x_logger, x_message, x_log_backtrace, x_log_call_stack);
+    log(x_logger, c_error_level, x_message, x_log_backtrace, x_log_call_stack);
   end error;
 
   /**
@@ -3344,8 +3347,43 @@ create or replace package body logging is
                   x_log_call_stack in boolean default true) is
   begin
     $if dbms_db_version.version >= 11 $then pragma inline('log', 'YES'); $end
-    log(c_fatal_level, x_logger, x_message, x_log_backtrace, x_log_call_stack);
+    log(x_logger, c_fatal_level, x_message, x_log_backtrace, x_log_call_stack);
   end fatal;
+
+  /**
+  * Function checks, whether the given level is enabled for for given logger.
+  * @param x_logger Logger settings.
+  * @param x_log_level Log level.
+  * @return
+  * {*} TRUE if log level for given logger is TRACE or lower.
+  * {*} FALSE if log level for given logger is higher than TRACE.
+  */
+  function is_level_enabled(x_logger    in out nocopy logger_type,
+                            x_log_level in t_logger.log_level%type) return boolean is
+    $if $$debug $then l_intlogger t_logger.logger%type := 'is_trace_enabled'; $end
+  begin
+    $if $$debug $then
+      internal_log(logging.c_info_level, l_intlogger, 'start');
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.logger: ' || x_logger.logger);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || x_logger.always_from_ctx);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.app: ' || x_logger.app);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_log_level: ' || x_log_level);
+    $end
+
+    if x_logger.always_from_ctx = c_true then
+      -- check whether custom session settings has been requested, if yes, use them
+      $if dbms_db_version.version >= 11 $then pragma inline('use_requested_session_settings',  'YES'); $end
+      use_requested_session_settings(x_logger.app);      
+      
+      $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_level', 'YES'); $end
+      x_logger.log_level := get_current_used_level(x_logger.logger);
+    end if;
+    $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
+    return x_logger.log_level <= x_log_level;
+  end is_level_enabled;
+
 
   /**
   * Function checks, whether TRACE log message will be logged for given logger.

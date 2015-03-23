@@ -199,11 +199,6 @@ create or replace package logging is
   function int_to_bool(x_number in number) return boolean;
   function is_cyclic_buffer_empty return boolean;
   function is_initialized(x_ctx in ctx_namespace_type) return boolean;
-  procedure log(x_level          in t_log_level.log_level%type,
-                x_logger         in out nocopy logger_type,
-                x_message        in message_type,
-                x_log_backtrace  in boolean,
-                x_log_call_stack in boolean);
   procedure log_smtp(x_app           in t_app_appender.app%type,
                      x_logger_name   in t_logger.logger%type,
                      x_level         in t_log_level.log_level%type,
@@ -446,6 +441,21 @@ create or replace package logging is
   procedure remove_session_appender(x_logger_name in t_logger.logger%type, x_appender_code in t_appender.code%type);
 
   /**
+  * Procedure logs message with given log level (according to the selection rule) for given logger.
+  * @param x_logger Logger settings.
+  * @param x_log_level Log level.
+  * @param x_message Message.
+  * @param x_log_backtrace Flag, whether log backtrace.
+  * @param x_log_call_stack Flag, whether log callstack.
+  */
+  procedure log(x_logger         in out nocopy logger_type,
+                x_log_level      in t_logger.log_level%type,
+                x_message        in message_type default sqlerrm,
+                x_log_backtrace  in boolean default true,
+                x_log_call_stack in boolean default true);
+
+
+  /**
   * Procedure logs message with TRACE log level (according to the selection rule) for given logger.
   * @param x_logger Logger settings.
   * @param x_message Message.
@@ -516,6 +526,19 @@ create or replace package logging is
                   x_message        in message_type default sqlerrm,
                   x_log_backtrace  in boolean default true,
                   x_log_call_stack in boolean default true);
+
+
+  /**
+  * Function checks, whether the given level is enabled for for given logger.
+  * @param x_logger Logger settings.
+  * @param x_log_level Log level.
+  * @return
+  * {*} TRUE if log level for given logger is TRACE or lower.
+  * {*} FALSE if log level for given logger is higher than TRACE.
+  */
+  function is_level_enabled(x_logger    in out nocopy logger_type,
+                            x_log_level in t_logger.log_level%type) return boolean;
+                            
 
   /**
   * Function checks whether TRACE log message will be logged for given logger.
