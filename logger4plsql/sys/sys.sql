@@ -4,6 +4,7 @@ spool sys.log
 
 connect &&sys_connect
 @@./users.sql
+@@./contexts.sql
 @@./roles.sql
 @@./grants.sql
 spool off

@@ -3,4 +3,3 @@ GRANT CREATE TABLE TO &logger_role;
 GRANT CREATE VIEW TO &logger_role;
 GRANT CREATE SEQUENCE TO &logger_role;
 GRANT CREATE PROCEDURE TO &logger_role;
-GRANT CREATE ANY CONTEXT TO &logger_role;

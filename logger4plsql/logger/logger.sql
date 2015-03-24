@@ -2,7 +2,6 @@ spool logger.log
 @@./../params.sql
 
 connect &logger_connect
-@@./contexts.sql
 @@./tables.sql
 @@./sequences.sql
 @@./views.sql

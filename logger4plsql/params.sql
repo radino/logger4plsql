@@ -41,6 +41,11 @@ define table_large_quota=1G
 define index_small_quota=10M
 define index_large_quota=1G
 
+rem Uninstall parameters
+rem =====================
+define drop_schema=&NO
+
+
 rem Connection parameters 
 rem =====================
 

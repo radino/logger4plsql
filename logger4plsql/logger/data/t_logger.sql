@@ -1,2 +1,2 @@
 insert into T_LOGGER (LOGGER, LOG_LEVEL, APPENDERS, ADDITIVITY)
-values ('/', 'ERROR', 0, 0);
+values ('/', 50000, 0, 0);

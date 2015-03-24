@@ -1,0 +1,1 @@
+revoke &logger_role from &logger_user;
