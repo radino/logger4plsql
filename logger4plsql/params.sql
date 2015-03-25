@@ -43,7 +43,7 @@ define index_large_quota=1G
 
 rem Uninstall parameters
 rem =====================
-define drop_schema=&NO
+define drop_schema="&NO"
 
 
 rem Connection parameters 
