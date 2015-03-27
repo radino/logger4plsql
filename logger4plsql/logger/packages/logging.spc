@@ -54,7 +54,7 @@ create or replace package logging is
   ver_lt_11_2 constant boolean := $if (dbms_db_version.version < 11) -- less than 11
            or (dbms_db_version.version = 11 and dbms_db_version.release < 2) -- or less than 11.2
            $then true $else false $end;
-                                 
+
   /** Type for serialization operation: e.g. set logger parameters, set appender parameter, etc. */
   subtype serialization_ops_type is varchar2(5);
 
@@ -82,7 +82,7 @@ create or replace package logging is
     app                t_app_appender.app%type,
     appenders_params   appenders_params_type -- currently not used
     );
-    
+
   /** Log level ALL: The ALL has the lowest possible rank and is intended to turn on all logging. */
   c_all_level constant t_logger.log_level%type := -99999;
 
@@ -125,6 +125,7 @@ create or replace package logging is
   -- these elements are public only when unit testing precompiler option is set to TRUE
   $if $$unit_test $then
   -- types and variables
+  type exception_params_type is table of message_type;
   subtype visibility_type is pls_integer range 1 .. 2;
   c_global_flag  constant visibility_type := 1;
   c_session_flag constant visibility_type := 2;
@@ -146,6 +147,8 @@ create or replace package logging is
     loggers      logger_settings_col_type,
     app_settings app_settings_col_type);
 
+  function bind_params(x_message in message_type,
+                       x_params  in exception_params_type) return message_type;
   procedure internal_log(x_level    in t_logger.log_level%type,
                          x_logger   in t_logger.logger%type,
                          x_message  in message_type,
@@ -538,7 +541,7 @@ create or replace package logging is
   */
   function is_level_enabled(x_logger    in out nocopy logger_type,
                             x_log_level in t_logger.log_level%type) return boolean;
-                            
+
 
   /**
   * Function checks whether TRACE log message will be logged for given logger.
@@ -717,7 +720,7 @@ create or replace package logging is
                             x_value     in ctx_value_type);
 
   /**
-  * Procedure clears all contexts. 
+  * Procedure clears all contexts.
   * For internal use only. Do not use.
   * @param x_namespace Name of context
   * @raises e_internal_use_only Can not be called from another schema.
