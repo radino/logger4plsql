@@ -17,6 +17,19 @@ create or replace package logging is
   * ALTER PACKAGE logging COMPILE PLSQL_CCFLAGS = 'debug:FALSE, unit_test:FALSE' REUSE SETTINGS
   */
 
+  /** exeption for unimplemented feature */
+  e_unimplemented_feature exception; 
+  /** exeption code for unimplemented feature */
+  c_unimplemented_feature_code constant pls_integer := -20999;
+  pragma exception_init(e_unimplemented_feature, -20999);
+
+  /** exeption for internal use only */
+  e_internal_use exception; 
+  /** exeption code for internal use only */
+  c_internal_use_code constant pls_integer := -20003;
+  pragma exception_init(e_internal_use, -20003);
+
+
   /** Type for parameter names. */
   type param_names_type is table of user_objects.object_name%type;
 
@@ -153,7 +166,6 @@ create or replace package logging is
                          x_logger   in t_logger.logger%type,
                          x_message  in message_type,
                          x_appender in pls_integer default g_internal_appenders);
-  procedure init_log_level_severities;
   $end
   function bool_to_int(x_boolean in boolean) return number;
   procedure clear_all_context_rac_aware(x_namespace in ctx_namespace_type, x_visibility in visibility_type);
@@ -163,7 +175,7 @@ create or replace package logging is
   function format_message(x_message     in message_type,
                           x_layout      in t_app_appender.parameter_value%type,
                           x_logger_name in t_logger.logger%type,
-                          x_level       in t_logger.log_level%type) return varchar2;
+                          x_level       in t_log.log_level%type) return varchar2;
   function get_app(x_schema in t_schema_app.schema%type) return t_schema_app.app%type;
   function get_appender_param(x_app            in t_app_appender.app%type,
                               x_appender_code  in t_app_appender.appender_code%type,
@@ -189,12 +201,10 @@ create or replace package logging is
                       x_visibility    in visibility_type default c_global_flag)
     return t_app_appender.parameter_value%type;
   function get_level(x_logger_name in t_logger.logger%type, x_ctx_name in varchar2) return t_logger.log_level%type;
-  function get_level_severity(x_level in t_log_level.log_level%type) return t_log_level.severity%type;
   function get_nth_logger_name(x_logger_name in t_logger.logger%type, x_nth in pls_integer) return t_logger.logger%type;
   function get_session_ctx_usage return boolean;
   procedure init_appenders(x_visibility in visibility_type default c_global_flag);
   procedure init_email_cyclic_buffer(x_app in varchar2);
-  procedure init_levels;
   procedure init_loggers(x_visibility in visibility_type default c_global_flag, x_app in t_app.app%type default null);
   procedure init_params(x_visibility in visibility_type default c_global_flag, x_app in t_param.app%type default null);
   procedure init_session_identifier;
@@ -204,19 +214,19 @@ create or replace package logging is
   function is_initialized(x_ctx in ctx_namespace_type) return boolean;
   procedure log_smtp(x_app           in t_app_appender.app%type,
                      x_logger_name   in t_logger.logger%type,
-                     x_level         in t_log_level.log_level%type,
+                     x_level         in t_logger.log_level%type,
                      x_message       in message_type,
                      x_call_stack    in boolean,
                      x_log_backtrace in boolean);
   procedure log_stdout(x_app           in t_app_appender.app%type,
                        x_logger_name   in t_logger.logger%type,
-                       x_level         in t_log_level.log_level%type,
+                       x_level         in t_logger.log_level%type,
                        x_message       in message_type,
                        x_call_stack    in boolean,
                        x_log_backtrace in boolean);
   procedure log_table(x_app           in t_app_appender.app%type,
                       x_logger_name   in t_logger.logger%type,
-                      x_level         in t_log_level.log_level%type,
+                      x_level         in t_logger.log_level%type,
                       x_message       in message_type,
                       x_call_stack    in boolean,
                       x_log_backtrace in boolean);
@@ -230,7 +240,7 @@ create or replace package logging is
                                   x_value      in ctx_value_type,
                                   x_visibility in visibility_type);
   procedure send_buffer(x_app in t_app_appender.app%type);
-  procedure unimplemented;
+  procedure unimplemented(x_feature in varchar2);
   procedure use_requested_session_settings(x_app in t_app.app%type);
   procedure set_context(x_namespace in ctx_namespace_type,
                         x_attribute in ctx_attribute_type,

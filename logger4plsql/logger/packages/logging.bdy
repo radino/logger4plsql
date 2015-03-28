@@ -31,7 +31,16 @@ create or replace package body logging is
   * (*) project page        https://github.com/radino/logger4plsql/
   * @author Radoslav Golian
   */
+  
+  /** Type for exception messages. */ 
+  subtype exception_msg_type is varchar2(255);
+  
+  /** exeption message for unimplemented feature. */ 
+  c_unimplemented_feature_msg constant exception_msg_type := 'Unimplemented feature: %{1}';
 
+  /** exeption message for unimplemented feature. */ 
+  c_internal_use_msg constant exception_msg_type := 'For internal use only.';
+  
   /** User using a logger. */
   c_user constant varchar2(32) := upper(user);
 
@@ -227,18 +236,19 @@ create or replace package body logging is
   begin
     l_message := x_message;
     for i in 1..x_params.count loop
-      l_message := replace(l_message, '{'||i||'}', x_params(i));
+      l_message := replace(l_message, '%{'||i||'}', x_params(i));
     end loop;
     return l_message;
   end bind_params;
   
   /** Procedure raises uniplemented feature exception.
   */
-  procedure unimplemented is
+  procedure unimplemented(x_feature in varchar2) is
     $if $$debug $then l_intlogger t_logger.logger%type := 'unimplemented'; $end
   begin
     $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'unimplemented feature'); $end
-    raise_application_error('-20999', 'unimplemented feature');
+    raise_application_error(c_unimplemented_feature_code, 
+                            bind_params(c_unimplemented_feature_msg, exception_params_type(x_feature)));
   end unimplemented;
 
   /**
@@ -294,7 +304,7 @@ create or replace package body logging is
 
     if c_user <> c_schema_name then
       $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'access violation'); $end
-      raise_application_error(-20003, 'for internal use only');
+      raise_application_error(c_internal_use_code, c_internal_use_msg);
     end if;
 
     $if dbms_db_version.version >= 11 $then pragma inline('set_context',  'YES'); $end
@@ -320,7 +330,7 @@ create or replace package body logging is
 
     if c_user <> c_schema_name then
       $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'access violation'); $end
-      raise_application_error(-20003, 'for internal use only');
+      raise_application_error(c_internal_use_code, c_internal_use_msg);
     end if;
 
     $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'clearing context'); $end
