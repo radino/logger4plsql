@@ -99,6 +99,9 @@ create or replace package body logging is
      app_settings     app_settings_col_type
   );
 
+  /** Type for collection of serialized logging settings. */
+  type deserialized_settings_col_type is table of deserialized_settings_type;
+
   $end
 
   /** Type for context list */
@@ -181,7 +184,7 @@ create or replace package body logging is
   g_root_logger_hash hash_type;
 
   /** A variable for builtding serialized settings */
-  g_serialized_settings deserialized_settings_type;
+  g_serialized_settings deserialized_settings_col_type;
 
   -- these elements are defined only if internal debugging is set to TRUE
   $if $$debug $then
@@ -1933,13 +1936,39 @@ create or replace package body logging is
   end set_session_parameter;
 
   /**
-  * Procedure clears all serialized settings.
+  * Funtion creates a handle all serialized settings.
   */
-  procedure clear_serialized_settings is
-    $if $$debug $then l_intlogger t_logger.logger%type := 'clear_serialized_settings'; $end
+  function get_serialized_setting_handle return pls_integer is 
+    $if $$debug $then l_intlogger t_logger.logger%type := 'get_serialized_setting_handle'; $end
   begin
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'start'); $end
-    g_serialized_settings := null;
+
+    g_serialized_settings.extend;
+    
+    $if $$debug $then 
+      internal_log(logging.c_debug_level, l_intlogger, 'handle: ' || g_serialized_settings.last);
+      internal_log(logging.c_info_level, l_intlogger, 'end'); 
+    $end
+    return g_serialized_settings.last;
+  end get_serialized_setting_handle;
+
+  /**
+  * Procedure clears all serialized settings.
+  * @param x_setting_handle A handle for settings.
+  */
+  procedure clear_serialized_settings(x_setting_handle in pls_integer default 1) is
+    $if $$debug $then l_intlogger t_logger.logger%type := 'clear_serialized_settings'; $end
+  begin
+    $if $$debug $then 
+      internal_log(logging.c_info_level, l_intlogger, 'start'); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_setting_handle: ' || x_setting_handle);
+    $end
+
+    if not g_serialized_settings.exists(x_setting_handle) then 
+      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+    end if;
+    
+    g_serialized_settings.delete(x_setting_handle);
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
   end clear_serialized_settings;
 
@@ -1948,10 +1977,12 @@ create or replace package body logging is
   * @param x_logger_name Logger name.
   * @param x_appender_code Appender code.
   * @param x_additivity Additivity flag.
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   */
-  procedure add_serialized_appender(x_logger_name   in t_logger.logger%type,
-                                    x_appender_code in t_appender.code%type,
-                                    x_additivity    in boolean default true) is
+  procedure add_serialized_appender(x_logger_name    in t_logger.logger%type,
+                                    x_appender_code  in t_appender.code%type,
+                                    x_additivity     in boolean default true,
+                                    x_setting_handle in pls_integer default 1) is
     $if $$debug $then l_intlogger t_logger.logger%type := 'add_serialized_appender'; $end
     l_appenders t_logger.appenders%type;
     l_dummy     varchar2(1);
@@ -1961,7 +1992,12 @@ create or replace package body logging is
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name);
       internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code);
       internal_log(logging.c_debug_level, l_intlogger, 'x_additivity: ' || bool_to_int(x_additivity));
+      internal_log(logging.c_debug_level, l_intlogger, 'x_setting_handle: ' || x_setting_handle);
     $end
+
+    if not g_serialized_settings.exists(x_setting_handle) then 
+      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+    end if;
 
     begin
       select null
@@ -1975,11 +2011,11 @@ create or replace package body logging is
     end;
 
     -- add appender
-    l_appenders := coalesce(g_serialized_settings.loggers(x_logger_name).enabled_appenders, 0);
+    l_appenders := coalesce(g_serialized_settings(x_setting_handle).loggers(x_logger_name).enabled_appenders, 0);
     l_appenders := bit_or(l_appenders, x_appender_code);
     $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'l_appenders: ' || l_appenders); $end
-    g_serialized_settings.loggers(x_logger_name).enabled_appenders := l_appenders;
-    g_serialized_settings.loggers(x_logger_name).additivity := bool_to_int(x_additivity);
+    g_serialized_settings(x_setting_handle).loggers(x_logger_name).enabled_appenders := l_appenders;
+    g_serialized_settings(x_setting_handle).loggers(x_logger_name).additivity := bool_to_int(x_additivity);
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
   end add_serialized_appender;
 
@@ -1987,9 +2023,11 @@ create or replace package body logging is
   * Procedure removes given appender from given logger in serialized settings.
   * @param x_logger_name Logger name.
   * @param x_appender_code Appender code.
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   */
   procedure remove_serialized_appender(x_logger_name   in t_logger.logger%type,
-                                       x_appender_code in t_appender.code%type) is
+                                       x_appender_code in t_appender.code%type,
+                                       x_setting_handle in pls_integer default 1) is
     $if $$debug $then l_intlogger t_logger.logger%type := 'remove_serialized_appender'; $end
     l_appenders t_logger.appenders%type;
     l_dummy     varchar2(1);
@@ -1998,7 +2036,12 @@ create or replace package body logging is
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name);
       internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_setting_handle: ' || x_setting_handle);
     $end
+
+    if not g_serialized_settings.exists(x_setting_handle) then 
+      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+    end if;
 
     begin
       select null
@@ -2011,7 +2054,7 @@ create or replace package body logging is
         raise_application_error(-20001, 'no such appender');
     end;
 
-    l_appenders := coalesce(g_serialized_settings.loggers(x_logger_name).enabled_appenders, 0);
+    l_appenders := coalesce(g_serialized_settings(x_setting_handle).loggers(x_logger_name).enabled_appenders, 0);
     $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'l_appenders' || l_appenders); $end
 
     if bitand(l_appenders, x_appender_code) > 0 then
@@ -2020,7 +2063,7 @@ create or replace package body logging is
         internal_log(logging.c_info_level, l_intlogger, 'removing appender.');
         internal_log(logging.c_debug_level, l_intlogger, 'l_appenders' || l_appenders);
       $end
-      g_serialized_settings.loggers(x_logger_name).enabled_appenders := l_appenders;
+      g_serialized_settings(x_setting_handle).loggers(x_logger_name).enabled_appenders := l_appenders;
     end if;
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
   end remove_serialized_appender;
@@ -2030,17 +2073,25 @@ create or replace package body logging is
   * Procedure sets additivity flag for given logger in serialized settings.
   * @param x_logger_name Loger name.
   * @param x_additivity Additivity flag.
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   */
   procedure set_serialized_additivity(x_logger_name in t_logger.logger%type,
-                                      x_additivity  in boolean) is
+                                      x_additivity  in boolean,
+                                      x_setting_handle in pls_integer default 1) is
     $if $$debug $then l_intlogger t_logger.logger%type := 'set_serialized_additivity'; $end
   begin
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name);
       internal_log(logging.c_debug_level, l_intlogger, 'x_additivity: ' || bool_to_int(x_additivity));
+      internal_log(logging.c_debug_level, l_intlogger, 'x_setting_handle: ' || x_setting_handle);
     $end
-    g_serialized_settings.loggers(x_logger_name).additivity := bool_to_int(x_additivity);
+
+    if not g_serialized_settings.exists(x_setting_handle) then 
+      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+    end if;
+
+    g_serialized_settings(x_setting_handle).loggers(x_logger_name).additivity := bool_to_int(x_additivity);
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
   end set_serialized_additivity;
 
@@ -2050,11 +2101,13 @@ create or replace package body logging is
   * @param x_appender_code_code Appender code.
   * @param x_parameter_name Parameter name.
   * @param x_parameter_value Parameter value.
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   */
   procedure set_serialized_appender_param(x_app             in t_app_appender.app%type,
                                           x_appender_code   in t_app_appender.appender_code%type,
                                           x_parameter_name  in t_app_appender.parameter_name%type,
-                                          x_parameter_value in t_app_appender.parameter_value%type) is
+                                          x_parameter_value in t_app_appender.parameter_value%type,
+                                          x_setting_handle  in pls_integer default 1) is
     $if $$debug $then l_intlogger t_logger.logger%type := 'set_serialized_appender_param'; $end
   begin
     $if $$debug $then
@@ -2063,9 +2116,14 @@ create or replace package body logging is
       internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code);
       internal_log(logging.c_debug_level, l_intlogger, 'x_parameter_name: ' || x_parameter_name);
       internal_log(logging.c_debug_level, l_intlogger, 'x_parameter_value: ' || x_parameter_value);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_setting_handle: ' || x_setting_handle);
     $end
 
-    g_serialized_settings.app_settings(x_app).appenders_params(x_appender_code)(x_parameter_name) := x_parameter_value;
+    if not g_serialized_settings.exists(x_setting_handle) then 
+      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+    end if;
+
+    g_serialized_settings(x_setting_handle).app_settings(x_app).appenders_params(x_appender_code)(x_parameter_name) := x_parameter_value;
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
   end set_serialized_appender_param;
 
@@ -2075,10 +2133,12 @@ create or replace package body logging is
   * @param x_app Application name.
   * @param x_appender_code Appender code.
   * @param x_layout Layout.
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   */
-  procedure set_serialized_layout(x_app      in t_app_appender.app%type,
-                                  x_appender_code in t_app_appender.appender_code%type,
-                                  x_layout   in t_app_appender.parameter_value%type) is
+  procedure set_serialized_layout(x_app            in t_app_appender.app%type,
+                                  x_appender_code  in t_app_appender.appender_code%type,
+                                  x_layout         in t_app_appender.parameter_value%type,
+                                  x_setting_handle in pls_integer default 1) is
     $if $$debug $then l_intlogger t_logger.logger%type := 'set_serialized_layout'; $end
   begin
     $if $$debug $then
@@ -2086,13 +2146,19 @@ create or replace package body logging is
       internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app);
       internal_log(logging.c_debug_level, l_intlogger, 'x_appender_code: ' || x_appender_code);
       internal_log(logging.c_debug_level, l_intlogger, 'x_layout: ' || x_layout);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_setting_handle: ' || x_setting_handle);
     $end
+
+    if not g_serialized_settings.exists(x_setting_handle) then 
+      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+    end if;
 
     $if dbms_db_version.version >= 11 $then pragma inline('set_serialized_appender_param','YES'); $end
     set_serialized_appender_param(x_app             => x_app,
                                   x_appender_code   => x_appender_code,
                                   x_parameter_name  => c_layout_param,
-                                  x_parameter_value => x_layout);
+                                  x_parameter_value => x_layout,
+                                  x_setting_handle  => x_setting_handle);
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
   end set_serialized_layout;
 
@@ -2100,17 +2166,25 @@ create or replace package body logging is
   * Procedure sets session log level for given logger.
   * @param x_logger Logger name.
   * @param x_log_level Log level.
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   */
   procedure set_serialized_level(x_logger_name in t_logger.logger%type,
-                                 x_log_level   in t_logger.log_level%type) is
+                                 x_log_level   in t_logger.log_level%type,
+                                 x_setting_handle in pls_integer default 1) is
     $if $$debug $then l_intlogger t_logger.logger%type := 'set_serialized_level'; $end
   begin
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name);
       internal_log(logging.c_debug_level, l_intlogger, 'x_log_level: ' || x_log_level);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_setting_handle: ' || x_setting_handle);
     $end
-    g_serialized_settings.loggers(x_logger_name).log_level := x_log_level;
+
+    if not g_serialized_settings.exists(x_setting_handle) then 
+      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+    end if;
+
+    g_serialized_settings(x_setting_handle).loggers(x_logger_name).log_level := x_log_level;
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
   end set_serialized_level;
 
@@ -2119,10 +2193,12 @@ create or replace package body logging is
   * @param x_app Application.
   * @param x_param_name Parameter name.
   * @param x_param_value Parameter value.
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   */
   procedure set_serialized_parameter(x_app         in t_param.app%type,
                                      x_param_name  in t_param.param_name%type,
-                                     x_param_value in t_param.param_value%type) is
+                                     x_param_value in t_param.param_value%type,
+                                     x_setting_handle in pls_integer default 1) is
     $if $$debug $then l_intlogger t_logger.logger%type := 'set_serialized_parameter'; $end
   begin
     $if $$debug $then
@@ -2130,16 +2206,23 @@ create or replace package body logging is
       internal_log(logging.c_debug_level, l_intlogger, 'x_app: ' || x_app);
       internal_log(logging.c_debug_level, l_intlogger, 'x_param_name: ' || x_param_name);
       internal_log(logging.c_debug_level, l_intlogger, 'x_param_value: ' || x_param_value);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_setting_handle: ' || x_setting_handle);
     $end
-    g_serialized_settings.app_settings(x_app).app_params(x_param_name) := x_param_value;
+
+    if not g_serialized_settings.exists(x_setting_handle) then 
+      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+    end if;
+
+    g_serialized_settings(x_setting_handle).app_settings(x_app).app_params(x_param_name) := x_param_value;
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
   end set_serialized_parameter;
 
   /**
-  * Function serializes given settings variable to a string.
+  * Function serializes given settings to a string.
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   * @return Serialized settings in a string
   */
-  function serialize_settings return ctx_value_type is
+  function serialize_settings(x_setting_handle in pls_integer default 1) return ctx_value_type is
     l_result ctx_value_type := null;
     l_logger_name t_logger.logger%type;
     l_param_name t_app_appender.parameter_name%type;
@@ -2148,46 +2231,53 @@ create or replace package body logging is
     l_app_name t_app.app%type;
     $if $$debug $then l_intlogger t_logger.logger%type := 'serialize_settings'; $end
   begin
-    $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'start'); $end
+    $if $$debug $then 
+      internal_log(logging.c_info_level, l_intlogger, 'start'); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_setting_handle: ' || x_setting_handle);
+    $end
 
-    l_logger_name := g_serialized_settings.loggers.first;
+    if not g_serialized_settings.exists(x_setting_handle) then 
+      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+    end if;
+
+    l_logger_name := g_serialized_settings(x_setting_handle).loggers.first;
     while l_logger_name is not null loop
        l_result := l_result || c_set_logger_op || c_ser_delim
                    || l_logger_name || c_ser_delim
-                   || cast(g_serialized_settings.loggers(l_logger_name).enabled_appenders as varchar2) || c_ser_delim
-                   || g_serialized_settings.loggers(l_logger_name).log_level || c_ser_delim
-                   || cast(g_serialized_settings.loggers(l_logger_name).additivity as varchar2) || c_ser_delim;
-       l_logger_name := g_serialized_settings.loggers.next(l_logger_name);
+                   || cast(g_serialized_settings(x_setting_handle).loggers(l_logger_name).enabled_appenders as varchar2) || c_ser_delim
+                   || g_serialized_settings(x_setting_handle).loggers(l_logger_name).log_level || c_ser_delim
+                   || cast(g_serialized_settings(x_setting_handle).loggers(l_logger_name).additivity as varchar2) || c_ser_delim;
+       l_logger_name := g_serialized_settings(x_setting_handle).loggers.next(l_logger_name);
     end loop;
     $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'loggers added: ' || l_result); $end
 
-    l_app_name := g_serialized_settings.app_settings.first;
+    l_app_name := g_serialized_settings(x_setting_handle).app_settings.first;
     while l_app_name is not null loop
-      l_param_name := g_serialized_settings.app_settings(l_app_name).app_params.first;
+      l_param_name := g_serialized_settings(x_setting_handle).app_settings(l_app_name).app_params.first;
       while l_param_name is not null loop
          l_result := l_result || c_set_app_param_op || c_ser_delim
                      || l_app_name || c_ser_delim
                      || l_param_name || c_ser_delim
-                     || g_serialized_settings.app_settings(l_app_name).app_params(l_param_name)  || c_ser_delim;
-         l_param_name := g_serialized_settings.app_settings(l_app_name).app_params.next(l_param_name);
+                     || g_serialized_settings(x_setting_handle).app_settings(l_app_name).app_params(l_param_name)  || c_ser_delim;
+         l_param_name := g_serialized_settings(x_setting_handle).app_settings(l_app_name).app_params.next(l_param_name);
       end loop;
       $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'app params added: ' || l_result); $end
 
-      l_appender := g_serialized_settings.app_settings(l_app_name).appenders_params.first;
+      l_appender := g_serialized_settings(x_setting_handle).app_settings(l_app_name).appenders_params.first;
       while l_appender is not null loop
-         l_append_param_name := g_serialized_settings.app_settings(l_app_name).appenders_params(l_appender).first;
+         l_append_param_name := g_serialized_settings(x_setting_handle).app_settings(l_app_name).appenders_params(l_appender).first;
          while l_append_param_name is not null loop
            l_result := l_result || c_set_app_appender_param_op || c_ser_delim || l_app_name || c_ser_delim
                        || l_appender || c_ser_delim
                        || l_append_param_name || c_ser_delim
-                       || g_serialized_settings.app_settings(l_app_name).appenders_params(l_appender)(l_append_param_name)  || c_ser_delim;
+                       || g_serialized_settings(x_setting_handle).app_settings(l_app_name).appenders_params(l_appender)(l_append_param_name)  || c_ser_delim;
 
-           l_append_param_name := g_serialized_settings.app_settings(l_app_name).appenders_params(l_appender).next(l_append_param_name);
+           l_append_param_name := g_serialized_settings(x_setting_handle).app_settings(l_app_name).appenders_params(l_appender).next(l_append_param_name);
          end loop;
-         l_appender := g_serialized_settings.app_settings(l_app_name).appenders_params.next(l_appender);
+         l_appender := g_serialized_settings(x_setting_handle).app_settings(l_app_name).appenders_params.next(l_appender);
       end loop;
 
-      l_app_name := g_serialized_settings.app_settings.next(l_app_name);
+      l_app_name := g_serialized_settings(x_setting_handle).app_settings.next(l_app_name);
     end loop;
     $if $$debug $then
       internal_log(logging.c_debug_level, l_intlogger, 'l_result: ' || l_result);
@@ -2198,11 +2288,12 @@ create or replace package body logging is
 
   /**
   * Function deserializes given settings to a record
-  * @return a record containing deserialized settings.
+  * @param x_settings Serialized settings.
+  * @return A handle for settings. A handle represents a set of parameters.
   */
-  function get_deserialized_settings(x_settings in ctx_value_type) return deserialized_settings_type is
+  function get_deserialized_settings(x_settings in ctx_value_type) return pls_integer is
     $if $$debug $then l_intlogger t_logger.logger%type := 'get_deserialized_settings'; $end
-    l_serialized_settings deserialized_settings_type;
+    l_handle pls_integer;
     l_operation serialization_ops_type;
     l_logger t_logger.logger%type;
     l_log_level t_logger.log_level%type;
@@ -2245,6 +2336,8 @@ create or replace package body logging is
   begin
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'start'); $end
 
+    l_handle := get_serialized_setting_handle();
+
     l_pos := 1;
     loop
       l_operation := get_str_val(x_settings, l_pos, l_pos);
@@ -2257,16 +2350,16 @@ create or replace package body logging is
         l_log_level := get_str_val(x_settings, l_pos, l_pos);
         l_additivity := get_int_val(x_settings, l_pos, l_pos);
         if l_log_level is not null then
-          set_serialized_level(x_logger_name => l_logger, x_log_level => l_log_level);
+          set_serialized_level(x_logger_name => l_logger, x_log_level => l_log_level, x_setting_handle => l_handle);
         end if;
         if l_additivity is not null then
-          set_serialized_additivity(x_logger_name => l_logger, x_additivity => int_to_bool(l_additivity));
+          set_serialized_additivity(x_logger_name => l_logger, x_additivity => int_to_bool(l_additivity), x_setting_handle => l_handle);
         end if;
 
         l_appender := 1;
         while l_appenders > l_appender loop
           if bitand(l_appenders, l_appender) = l_appender then
-            add_serialized_appender(x_logger_name => l_logger, x_appender_code => l_appender);
+            add_serialized_appender(x_logger_name => l_logger, x_appender_code => l_appender, x_setting_handle => l_handle);
           end if;
           l_appender := l_appender*2;
         end loop;
@@ -2274,90 +2367,117 @@ create or replace package body logging is
         l_app := get_str_val(x_settings, l_pos, l_pos);
         l_param_name := get_str_val(x_settings, l_pos, l_pos);
         l_param_value := get_str_val(x_settings, l_pos, l_pos);
-        set_serialized_parameter(x_app => l_app, x_param_name => l_param_name, x_param_value => l_param_value);
+        set_serialized_parameter(x_app => l_app, x_param_name => l_param_name, x_param_value => l_param_value, x_setting_handle => l_handle);
       when c_set_app_appender_param_op then
         l_app := get_str_val(x_settings, l_pos, l_pos);
         l_appender := get_int_val(x_settings, l_pos, l_pos);
         l_param_name := get_str_val(x_settings, l_pos, l_pos);
         l_param_value := get_str_val(x_settings, l_pos, l_pos);
-        set_serialized_parameter(x_app => l_app, x_param_name => l_param_name, x_param_value => l_param_value);
+        set_serialized_parameter(x_app => l_app, x_param_name => l_param_name, x_param_value => l_param_value, x_setting_handle => l_handle);
       end case;
     end loop;
 
-    $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
-    return g_serialized_settings;
+    $if $$debug $then 
+      internal_log(logging.c_debug_level, l_intlogger, 'l_handle: ' || l_handle);
+      internal_log(logging.c_info_level, l_intlogger, 'end');
+    $end
+    return l_handle;
   end get_deserialized_settings;
 
-  /** Procedure shows serialized settings. */
-  procedure show_serialized_settings is
+  /** Procedure shows serialized settings. 
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
+  */
+  procedure show_serialized_settings(x_setting_handle in pls_integer default 1) is
     $if $$debug $then l_intlogger t_logger.logger%type := 'show_serialized_settings'; $end
   begin
-    $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'start'); $end
-    dbms_output.put_line(serialize_settings());
+    $if $$debug $then 
+      internal_log(logging.c_info_level, l_intlogger, 'start'); 
+      internal_log(logging.c_debug_level, l_intlogger, 'x_setting_handle: ' || x_setting_handle);
+    $end
+
+    if not g_serialized_settings.exists(x_setting_handle) then 
+      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+    end if;
+
+    dbms_output.put_line(serialize_settings(x_setting_handle));
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
   end show_serialized_settings;
 
   /** Procedure set sets given settings in the current session by calling set_session* methods.
-  * @param x_settings Deserialized settings.
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   */
-  procedure set_session_settings(x_settings in deserialized_settings_type) is
+  procedure set_session_settings(x_setting_handle in pls_integer default 1) is
     $if $$debug $then l_intlogger t_logger.logger%type := 'set_session_settings'; $end
     l_logger     t_logger.logger%type;
     l_app        t_app.app%type;
     l_appender   t_appender.code%type;
     l_param_name ctx_attribute_type;
   begin
+    $if $$debug $then 
+      internal_log(logging.c_info_level, l_intlogger, 'begin');
+      internal_log(logging.c_debug_level, l_intlogger, 'x_setting_handle: ' || x_setting_handle);
+    $end
+
+    if not g_serialized_settings.exists(x_setting_handle) then 
+      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+    end if;
 
     -- set loggers
-    l_logger := x_settings.loggers.first;
+    l_logger := g_serialized_settings(x_setting_handle).loggers.first;
     while l_logger is not null loop
-      if x_settings.loggers(l_logger).log_level is not null then
-        set_session_level(x_logger_name => l_logger, x_log_level => x_settings.loggers(l_logger).log_level);
+      if g_serialized_settings(x_setting_handle).loggers(l_logger).log_level is not null then
+        $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'setting level: ' || g_serialized_settings(x_setting_handle).loggers(l_logger).log_level || ' for logger: ' || l_logger); $end
+        set_session_level(x_logger_name => l_logger, x_log_level => g_serialized_settings(x_setting_handle).loggers(l_logger).log_level);
       end if;
-      if x_settings.loggers(l_logger).log_level is not null then
+      if g_serialized_settings(x_setting_handle).loggers(l_logger).additivity is not null then
+        $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'setting additivity: ' || g_serialized_settings(x_setting_handle).loggers(l_logger).additivity || ' for logger: ' || l_logger); $end
         set_session_additivity(x_logger_name => l_logger,
-                               x_additivity => int_to_bool(x_settings.loggers(l_logger).additivity));
+                               x_additivity => int_to_bool(g_serialized_settings(x_setting_handle).loggers(l_logger).additivity));
       end if;
 
       l_appender := 1;
-      while x_settings.loggers(l_logger).enabled_appenders > l_appender loop
-        if bitand(x_settings.loggers(l_logger).enabled_appenders, l_appender) = l_appender then
+      while g_serialized_settings(x_setting_handle).loggers(l_logger).enabled_appenders > l_appender loop
+        if bitand(g_serialized_settings(x_setting_handle).loggers(l_logger).enabled_appenders, l_appender) = l_appender then
+          $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'setting appender: ' || l_appender || ' for logger: ' || l_logger); $end
           add_session_appender(x_logger_name => l_logger, x_appender_code => l_appender);
         end if;
         l_appender := l_appender*2;
       end loop;
 
-      l_logger :=  x_settings.loggers.next(l_logger);
+      l_logger :=  g_serialized_settings(x_setting_handle).loggers.next(l_logger);
     end loop;
 
     -- set app params
-    l_app := x_settings.app_settings.first;
+    l_app := g_serialized_settings(x_setting_handle).app_settings.first;
     while l_app is not null loop
-      l_param_name := x_settings.app_settings(l_app).app_params.first;
+      l_param_name := g_serialized_settings(x_setting_handle).app_settings(l_app).app_params.first;
       while l_param_name is not null loop
+          $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'setting parameter: ' || l_param_name || ' to value: ' ||  g_serialized_settings(x_setting_handle).app_settings(l_app).app_params(l_param_name) || ' for app: ' || l_app); $end
           set_session_parameter(x_app => l_app,
                                 x_param_name => l_param_name,
-                                x_param_value => x_settings.app_settings(l_app).app_params(l_param_name));
-        l_param_name := x_settings.app_settings(l_app).app_params.next(l_param_name);
+                                x_param_value => g_serialized_settings(x_setting_handle).app_settings(l_app).app_params(l_param_name));
+        l_param_name := g_serialized_settings(x_setting_handle).app_settings(l_app).app_params.next(l_param_name);
       end loop;
 
 
-      l_appender := g_serialized_settings.app_settings(l_app).appenders_params.first;
+      l_appender := g_serialized_settings(x_setting_handle).app_settings(l_app).appenders_params.first;
       while l_appender is not null loop
-        l_param_name := g_serialized_settings.app_settings(l_app).appenders_params(l_appender).first;
+        l_param_name := g_serialized_settings(x_setting_handle).app_settings(l_app).appenders_params(l_appender).first;
         while l_param_name is not null loop
+          $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'setting parameter: ' || l_param_name || ' to value: ' ||   g_serialized_settings(x_setting_handle).app_settings(l_app).appenders_params(l_appender)(l_param_name) || ' for appender: ' || l_appender || ' and for app: ' || l_app); $end
           set_session_appender_param(x_app => l_app,
                                      x_appender_code =>  l_appender,
                                      x_parameter_name => l_param_name,
-                                     x_parameter_value => g_serialized_settings.app_settings(l_app).appenders_params(l_appender)(l_param_name));
-          l_param_name := g_serialized_settings.app_settings(l_app).appenders_params(l_appender).next(l_param_name);
+                                     x_parameter_value => g_serialized_settings(x_setting_handle).app_settings(l_app).appenders_params(l_appender)(l_param_name));
+          l_param_name := g_serialized_settings(x_setting_handle).app_settings(l_app).appenders_params(l_appender).next(l_param_name);
         end loop;
 
-        l_appender := g_serialized_settings.app_settings(l_app).appenders_params.next(l_appender);
+        l_appender := g_serialized_settings(x_setting_handle).app_settings(l_app).appenders_params.next(l_appender);
       end loop;
 
-      l_app :=  x_settings.app_settings.next(l_app);
+      l_app :=  g_serialized_settings(x_setting_handle).app_settings.next(l_app);
     end loop;
+    $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
   end set_session_settings;
 
   /**
@@ -2367,7 +2487,7 @@ create or replace package body logging is
   procedure use_requested_session_settings(x_app in t_app.app%type) is
     $if $$debug $then l_intlogger t_logger.logger%type := 'use_requested_session_settings'; $end
     l_settings ctx_value_type;
-    l_deserialized_settings deserialized_settings_type;
+    l_setting_handle pls_integer;
   begin
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
@@ -2382,12 +2502,13 @@ create or replace package body logging is
 
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'session settings requested, applying...'); $end
     -- if there have been some settings requested, apply them to current session
-    if l_settings is not null then
+    if l_settings	is not null then
       copy_global_to_session(x_app => x_app);
-      l_deserialized_settings := get_deserialized_settings(l_settings);
-      set_session_settings(l_deserialized_settings);
+      l_setting_handle := get_deserialized_settings(l_settings);
+      set_session_settings(l_setting_handle);
+      clear_serialized_settings(l_setting_handle);
       set_session_ctx_usage(x_usage => true);
-
+      
       -- clear the settings from context to not be applied multiple times
       set_context_rac_aware(c_modify_session_ctx, g_session_identifier, null, c_global_flag);
     end if;
@@ -3672,8 +3793,9 @@ create or replace package body logging is
   * @param x_instance Id of instance for the session (e.g. from gv$session.inst_id).
   * @param x_sessionid Audit session identifier (from gv$session.audsid)
   */
-  procedure apply_settings_for_session(x_instance  in pls_integer,
-                                       x_sessionid in number) is
+  procedure apply_settings_for_session(x_instance in pls_integer,
+                                       x_sessionid in number,
+                                       x_setting_handle in pls_integer default 1) is
     $if $$debug $then l_intlogger t_logger.logger%type := 'apply_settings_for_session'; $end
     l_settings ctx_value_type;
   begin
@@ -3683,7 +3805,7 @@ create or replace package body logging is
       internal_log(logging.c_debug_level, l_intlogger, 'x_sessionid: ' || x_sessionid);
     $end
 
-    l_settings := serialize_settings();
+    l_settings := serialize_settings(x_setting_handle);
     $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'l_settings: ' || l_settings); $end
 
     set_context_rac_aware(c_modify_session_ctx, x_instance || '#' || x_sessionid, l_settings, c_global_flag);
@@ -3772,6 +3894,9 @@ begin
   $if $$debug $then
     internal_log(logging.c_info_level, 'initialization', 'start');
   $end
+
+  -- default handle (= 1)
+  g_serialized_settings.extend;
 
   $if dbms_db_version.version >= 11 $then pragma inline('init_session_identifier', 'YES'); $end
   init_session_identifier();

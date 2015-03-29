@@ -159,6 +159,7 @@ create or replace package logging is
   type deserialized_settings_type is record(
     loggers      logger_settings_col_type,
     app_settings app_settings_col_type);
+  type deserialized_settings_col_type is table of deserialized_settings_type;
 
   function bind_params(x_message in message_type,
                        x_params  in exception_params_type) return message_type;
@@ -195,7 +196,7 @@ create or replace package logging is
     return t_param.param_value%type;
   function get_current_used_appenders(x_logger_name in t_logger.logger%type) return t_logger.appenders%type;
   function get_current_used_level(x_logger_name in t_logger.logger%type) return t_logger.log_level%type;
-  function get_deserialized_settings(x_settings in ctx_value_type) return deserialized_settings_type;
+  function get_deserialized_settings(x_settings in ctx_value_type) return pls_integer;
   function get_layout(x_app           in t_app_appender.app%type,
                       x_appender_code in t_app_appender.appender_code%type,
                       x_visibility    in visibility_type default c_global_flag)
@@ -234,7 +235,7 @@ create or replace package logging is
                         o_app        out varchar2,
                         x_method     in varchar2 default null,
                         x_call_stack in varchar2 default dbms_utility.format_call_stack());
-  function serialize_settings return ctx_value_type;
+  function serialize_settings(x_setting_handle in pls_integer default 1) return ctx_value_type;
   procedure set_context_rac_aware(x_namespace  in ctx_namespace_type,
                                   x_attribute  in ctx_attribute_type,
                                   x_value      in ctx_value_type,
@@ -639,37 +640,53 @@ create or replace package logging is
   */
   procedure remove_app(x_app in t_app.app%type);
 
-  /** Procedure shows serialized settings. */
-  procedure show_serialized_settings;
+  /** Procedure shows serialized settings. 
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
+  */
+  procedure show_serialized_settings(x_setting_handle in pls_integer default 1);
+
+  /**
+  * Funtion creates a handle all serialized settings. A handle represents a set of parameters.
+  */
+  function get_serialized_setting_handle return pls_integer;
 
   /**
   * Procedure clears all serialized settings.
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   */
-  procedure clear_serialized_settings;
+  procedure clear_serialized_settings(x_setting_handle in pls_integer default 1);
 
   /**
   * Procedure adds given appender to given logger and sets additivity flag for the logger in serialized settings.
   * @param x_logger_name Logger name.
   * @param x_appender_code Appender code.
   * @param x_additivity Additivity flag.
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   */
-  procedure add_serialized_appender(x_logger_name   in t_logger.logger%type,
-                                    x_appender_code in t_appender.code%type,
-                                    x_additivity    in boolean default true);
+  procedure add_serialized_appender(x_logger_name    in t_logger.logger%type,
+                                    x_appender_code  in t_appender.code%type,
+                                    x_additivity     in boolean default true,
+                                    x_setting_handle in pls_integer default 1);
 
   /**
   * Procedure removes given appender from given logger in serialized settings.
   * @param x_logger_name Logger name.
   * @param x_appender_code Appender code.
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   */
-  procedure remove_serialized_appender(x_logger_name in t_logger.logger%type, x_appender_code in t_appender.code%type);
+  procedure remove_serialized_appender(x_logger_name    in t_logger.logger%type, 
+                                       x_appender_code  in t_appender.code%type,
+                                       x_setting_handle in pls_integer default 1);
 
   /**
   * Procedure sets additivity flag for given logger in serialized settings.
   * @param x_logger_name Loger name.
   * @param x_additivity Additivity flag.
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   */
-  procedure set_serialized_additivity(x_logger_name in t_logger.logger%type, x_additivity in boolean);
+  procedure set_serialized_additivity(x_logger_name    in t_logger.logger%type,
+                                      x_additivity     in boolean,
+                                      x_setting_handle in pls_integer default 1);
 
   /**
   * Procedure sets session value for given parameter name, appender and application.
@@ -677,45 +694,57 @@ create or replace package logging is
   * @param x_appender_code Appender code.
   * @param x_parameter_name Parameter name.
   * @param x_parameter_value Parameter value.
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   */
   procedure set_serialized_appender_param(x_app             in t_app_appender.app%type,
                                           x_appender_code   in t_app_appender.appender_code%type,
                                           x_parameter_name  in t_app_appender.parameter_name%type,
-                                          x_parameter_value in t_app_appender.parameter_value%type);
+                                          x_parameter_value in t_app_appender.parameter_value%type,
+                                          x_setting_handle  in pls_integer default 1);
 
   /**
   * Procedure sets session layout for given appender and given application.
   * @param x_app Application name.
   * @param x_appender_code Appender code.
   * @param x_layout Layout.
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   */
-  procedure set_serialized_layout(x_app           in t_app_appender.app%type,
-                                  x_appender_code in t_app_appender.appender_code%type,
-                                  x_layout        in t_app_appender.parameter_value%type);
+  procedure set_serialized_layout(x_app            in t_app_appender.app%type,
+                                  x_appender_code  in t_app_appender.appender_code%type,
+                                  x_layout         in t_app_appender.parameter_value%type,
+                                  x_setting_handle in pls_integer default 1);
 
   /**
   * Procedure sets session log level for given logger.
   * @param x_logger Logger name.
   * @param x_log_level Log level.
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   */
-  procedure set_serialized_level(x_logger_name in t_logger.logger%type, x_log_level in t_logger.log_level%type);
+  procedure set_serialized_level(x_logger_name    in t_logger.logger%type, 
+                                 x_log_level      in t_logger.log_level%type,
+                                 x_setting_handle in pls_integer default 1);
 
   /**
   * Procedure sets session parameter value for given app and parameter name.
   * @param x_app Application.
   * @param x_param_name Parameter name.
   * @param x_param_value Parameter value.
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   */
-  procedure set_serialized_parameter(x_app         in t_param.app%type,
-                                     x_param_name  in t_param.param_name%type,
-                                     x_param_value in t_param.param_value%type);
+  procedure set_serialized_parameter(x_app            in t_param.app%type,
+                                     x_param_name     in t_param.param_name%type,
+                                     x_param_value    in t_param.param_value%type,
+                                     x_setting_handle in pls_integer default 1);
 
   /**
   * Procedure enables custom settings for given session.
   * @param x_instance Id of instance for the session (e.g. from gv$session.inst_id).
   * @param x_sessionid Audit session identifier (from gv$session.audsid)
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
   */
-  procedure apply_settings_for_session(x_instance in pls_integer, x_sessionid in number);
+  procedure apply_settings_for_session(x_instance in pls_integer, 
+                                       x_sessionid in number,
+                                       x_setting_handle in pls_integer default 1);
 
   /**
   * Procedure sets given attribute of given context to given value.
