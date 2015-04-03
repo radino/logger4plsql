@@ -1,4 +1,4 @@
-create or replace package logging is
+create or replace package logger.logging is
   /**
   * Implementation of log4j for PL/SQL.
   * Licence: MIT License (@see license.txt)
@@ -28,6 +28,37 @@ create or replace package logging is
   /** exeption code for internal use only */
   c_internal_use_code constant pls_integer := -20003;
   pragma exception_init(e_internal_use, -20003);
+
+  /** exeption for insufficient privileges */
+  e_insufficient_privs exception; 
+  /** exeption code for insufficient privileges */
+  c_insufficient_privs_code constant pls_integer := -20002;
+  pragma exception_init(e_insufficient_privs, -20002);
+
+  /** exeption for non-existing appender */
+  e_no_such_appender exception; 
+  /** exeption code for non-existing appender */
+  c_no_such_appender_code constant pls_integer := -20001;
+  pragma exception_init(e_no_such_appender, -20001);
+
+  /** exeption for non-existing application */
+  e_no_such_app exception; 
+  /** exeption code for non-existing application */
+  c_no_such_app_code constant pls_integer := -20004;
+  pragma exception_init(e_no_such_app, -20004);
+
+  /** exeption for non-existing handle */
+  e_no_such_handle exception; 
+  /** exeption code for non-existing handle */
+  c_no_such_handle_code constant pls_integer := -20005;
+  pragma exception_init(e_no_such_handle, -20005);
+
+  /** exeption for failure in SMTP protokol */
+  e_smtp_failure exception; 
+  /** exeption code for failure in SMTP protokol */
+  c_smtp_failure_code constant pls_integer := -20006;
+  pragma exception_init(e_smtp_failure, -20006);
+
 
 
   /** Type for parameter names. */

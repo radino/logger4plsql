@@ -1,4 +1,4 @@
-create or replace package body logging is
+create or replace package body logger.logging is
   /*
   Copyright (c) 2010 Radoslav Golian <radoslav.golian@gmail.com>
 
@@ -36,10 +36,25 @@ create or replace package body logging is
   subtype exception_msg_type is varchar2(255);
   
   /** exeption message for unimplemented feature. */ 
-  c_unimplemented_feature_msg constant exception_msg_type := 'Unimplemented feature: %{1}';
+  c_unimplemented_feature_msg constant exception_msg_type := 'Unimplemented feature: %{1}.';
 
   /** exeption message for unimplemented feature. */ 
   c_internal_use_msg constant exception_msg_type := 'For internal use only.';
+
+  /** exeption message for insufficient privileges feature. */ 
+  c_insufficient_privs_msg constant exception_msg_type := 'Insufficient privileges to %{1}.';
+ 
+  /** exeption message for non-existing appender. */ 
+  c_no_such_appender_msg constant exception_msg_type := 'Appender with code %{1} does not exist.';
+
+  /** exeption message for non-existing application. */ 
+  c_no_such_app_msg constant exception_msg_type := 'Application %{1} does not exist.';
+
+  /** exeption message for non-existing handle. */ 
+  c_no_such_handle_msg constant exception_msg_type := 'Handle %{1} does not exist.';
+
+  /** exeption message for failure in SMTP protokol. */ 
+  c_smtp_failure_msg constant exception_msg_type := 'SMTP command %{1} failed with %{2} %{3}.';
   
   /** User using a logger. */
   c_user constant varchar2(32) := upper(user);
@@ -1600,9 +1615,9 @@ create or replace package body logging is
     l_app := get_app(c_user);
     $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'l_app: ' || l_app); $end
 
-    if l_app is null and c_user not in ('sys', c_schema_name) then
+    if l_app is null and c_user not in ('SYS', c_schema_name) then
       $if $$debug $then internal_log(logging.c_error_level, l_intlogger, 'no privileges'); $end
-      raise_application_error(-20002, 'you have no privilege to set the appender.');
+      raise_application_error(c_insufficient_privs_code, bind_params(c_insufficient_privs_msg, exception_params_type('set appender for ' || x_logger_name)));
     end if;
 
     begin
@@ -1613,7 +1628,7 @@ create or replace package body logging is
     exception
       when no_data_found then
         $if $$debug $then internal_log(logging.c_error_level, l_intlogger, 'no such appender'); $end
-        raise_application_error(-20001, 'no such appender');
+        raise_application_error(c_no_such_appender_code, bind_params(c_no_such_appender_msg, exception_params_type(x_appender_code)));
     end;
 
     $if dbms_db_version.version >= 11 $then pragma inline('bool_to_int',  'YES'); $end
@@ -1686,7 +1701,7 @@ create or replace package body logging is
     exception
       when no_data_found then
         $if $$debug $then internal_log(logging.c_error_level, l_intlogger, 'no such application'); $end
-        raise_application_error(-20001, 'no such application');
+        raise_application_error(c_no_such_app_code, bind_params(c_no_such_app_msg, exception_params_type(l_app)));
     end;
 
 
@@ -1749,9 +1764,9 @@ create or replace package body logging is
     $if dbms_db_version.version >= 11 $then pragma inline('get_app',  'YES'); $end
     l_app := get_app(c_user);
 
-    if l_app is null and c_user not in ('sys', c_schema_name) then
+    if l_app is null and c_user not in ('SYS', c_schema_name) then
       $if $$debug $then internal_log(logging.c_error_level, l_intlogger, 'insufficient privileges for removing appender'); $end
-      raise_application_error(-20002, 'you have no privilege to set the appender.');
+      raise_application_error(c_insufficient_privs_code, bind_params(c_insufficient_privs_msg, exception_params_type('remove appender for ' || x_logger_name)));
     end if;
 
     begin
@@ -1762,7 +1777,7 @@ create or replace package body logging is
     exception
       when no_data_found then
         $if $$debug $then internal_log(logging.c_error_level, l_intlogger, 'appender not found'); $end
-        raise_application_error(-20001, 'no such appender');
+        raise_application_error(c_no_such_appender_code, bind_params(c_no_such_appender_msg, exception_params_type(x_appender_code)));
     end;
 
     -- unset appenders
@@ -1818,7 +1833,7 @@ create or replace package body logging is
     exception
       when no_data_found then
         $if $$debug $then internal_log(logging.c_error_level, l_intlogger, 'no such appender'); $end
-        raise_application_error(-20001, 'no such appender');
+        raise_application_error(c_no_such_appender_code, bind_params(c_no_such_appender_msg, exception_params_type(x_appender_code)));
     end;
 
     $if dbms_db_version.version >= 11 $then pragma inline('hash_logger_name',  'YES'); $end
@@ -1965,7 +1980,7 @@ create or replace package body logging is
     $end
 
     if not g_serialized_settings.exists(x_setting_handle) then 
-      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+      raise_application_error(c_no_such_handle_code, bind_params(c_no_such_handle_msg, exception_params_type(x_setting_handle)));
     end if;
     
     g_serialized_settings.delete(x_setting_handle);
@@ -1996,7 +2011,7 @@ create or replace package body logging is
     $end
 
     if not g_serialized_settings.exists(x_setting_handle) then 
-      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+      raise_application_error(c_no_such_handle_code, bind_params(c_no_such_handle_msg, exception_params_type(x_setting_handle)));
     end if;
 
     begin
@@ -2007,7 +2022,7 @@ create or replace package body logging is
     exception
       when no_data_found then
         $if $$debug $then internal_log(logging.c_error_level, l_intlogger, 'no such appender'); $end
-        raise_application_error(-20001, 'no such appender');
+        raise_application_error(c_no_such_appender_code, bind_params(c_no_such_appender_msg, exception_params_type(x_appender_code)));
     end;
 
     -- add appender
@@ -2040,7 +2055,7 @@ create or replace package body logging is
     $end
 
     if not g_serialized_settings.exists(x_setting_handle) then 
-      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+      raise_application_error(c_no_such_handle_code, bind_params(c_no_such_handle_msg, exception_params_type(x_setting_handle)));
     end if;
 
     begin
@@ -2051,7 +2066,7 @@ create or replace package body logging is
     exception
       when no_data_found then
         $if $$debug $then internal_log(logging.c_error_level, l_intlogger, 'no such appender'); $end
-        raise_application_error(-20001, 'no such appender');
+        raise_application_error(c_no_such_appender_code, bind_params(c_no_such_appender_msg, exception_params_type(x_appender_code)));
     end;
 
     l_appenders := coalesce(g_serialized_settings(x_setting_handle).loggers(x_logger_name).enabled_appenders, 0);
@@ -2088,7 +2103,7 @@ create or replace package body logging is
     $end
 
     if not g_serialized_settings.exists(x_setting_handle) then 
-      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+      raise_application_error(c_no_such_handle_code, bind_params(c_no_such_handle_msg, exception_params_type(x_setting_handle)));
     end if;
 
     g_serialized_settings(x_setting_handle).loggers(x_logger_name).additivity := bool_to_int(x_additivity);
@@ -2120,7 +2135,7 @@ create or replace package body logging is
     $end
 
     if not g_serialized_settings.exists(x_setting_handle) then 
-      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+      raise_application_error(c_no_such_handle_code, bind_params(c_no_such_handle_msg, exception_params_type(x_setting_handle)));
     end if;
 
     g_serialized_settings(x_setting_handle).app_settings(x_app).appenders_params(x_appender_code)(x_parameter_name) := x_parameter_value;
@@ -2150,7 +2165,7 @@ create or replace package body logging is
     $end
 
     if not g_serialized_settings.exists(x_setting_handle) then 
-      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+      raise_application_error(c_no_such_handle_code, bind_params(c_no_such_handle_msg, exception_params_type(x_setting_handle)));
     end if;
 
     $if dbms_db_version.version >= 11 $then pragma inline('set_serialized_appender_param','YES'); $end
@@ -2181,7 +2196,7 @@ create or replace package body logging is
     $end
 
     if not g_serialized_settings.exists(x_setting_handle) then 
-      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+      raise_application_error(c_no_such_handle_code, bind_params(c_no_such_handle_msg, exception_params_type(x_setting_handle)));
     end if;
 
     g_serialized_settings(x_setting_handle).loggers(x_logger_name).log_level := x_log_level;
@@ -2210,7 +2225,7 @@ create or replace package body logging is
     $end
 
     if not g_serialized_settings.exists(x_setting_handle) then 
-      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+      raise_application_error(c_no_such_handle_code, bind_params(c_no_such_handle_msg, exception_params_type(x_setting_handle)));
     end if;
 
     g_serialized_settings(x_setting_handle).app_settings(x_app).app_params(x_param_name) := x_param_value;
@@ -2237,7 +2252,7 @@ create or replace package body logging is
     $end
 
     if not g_serialized_settings.exists(x_setting_handle) then 
-      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+      raise_application_error(c_no_such_handle_code, bind_params(c_no_such_handle_msg, exception_params_type(x_setting_handle)));
     end if;
 
     l_logger_name := g_serialized_settings(x_setting_handle).loggers.first;
@@ -2396,7 +2411,7 @@ create or replace package body logging is
     $end
 
     if not g_serialized_settings.exists(x_setting_handle) then 
-      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+      raise_application_error(c_no_such_handle_code, bind_params(c_no_such_handle_msg, exception_params_type(x_setting_handle)));
     end if;
 
     dbms_output.put_line(serialize_settings(x_setting_handle));
@@ -2419,7 +2434,7 @@ create or replace package body logging is
     $end
 
     if not g_serialized_settings.exists(x_setting_handle) then 
-      raise_application_error(-20100, 'Handle ' || x_setting_handle|| ' does not exist.');
+      raise_application_error(c_no_such_handle_code, bind_params(c_no_such_handle_msg, exception_params_type(x_setting_handle)));
     end if;
 
     -- set loggers
@@ -2571,7 +2586,7 @@ create or replace package body logging is
     exception
       when no_data_found then
         $if $$debug $then internal_log(logging.c_error_level, l_intlogger, 'No such appender'); $end
-        raise_application_error(-20001, 'No such appender');
+        raise_application_error(c_no_such_appender_code, bind_params(c_no_such_appender_msg, exception_params_type(x_appender_code)));
     end;
 
     $if dbms_db_version.version >= 11 $then pragma inline('hash_logger_name',  'YES'); $end
@@ -3085,14 +3100,14 @@ create or replace package body logging is
 
     if l_reply.code <> 200 then
       $if $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'HELO failed'); $end
-      raise_application_error(-20002, 'HELO SMTP command failed');
+      raise_application_error(c_smtp_failure_code, bind_params(c_smtp_failure_msg, exception_params_type('HELO', l_reply.code, l_reply.text)));
     end if;
 
     l_reply := utl_smtp.mail(l_conn, l_from);
 
     if l_reply.code <> 200 then
       $if $$debug $then internal_log(logging.c_error_level, l_intlogger, 'mail failed'); $end
-      raise_application_error(-20002, 'MAIL SMTP command failed');
+      raise_application_error(c_smtp_failure_code, bind_params(c_smtp_failure_msg, exception_params_type('MAIL', l_reply.code, l_reply.text)));
     end if;
 
     $if dbms_db_version.version >= 11 $then pragma inline('get_current_appender_param',  'YES'); $end
@@ -3127,8 +3142,11 @@ create or replace package body logging is
       $end
       exit when l_comma_pos = 0;
 
-      l_reply := utl_smtp.rcpt(l_conn, substr(l_csv_list, l_offset, l_comma_pos - l_offset));
+      l_reply := utl_smtp.rcpt(l_conn, substr(l_csv_list, l_offset, l_comma_pos - l_offset));      
       $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'l_reply.code: ' || l_reply.code); $end
+      if l_reply.code <> 200 then
+        raise_application_error(c_smtp_failure_code, bind_params(c_smtp_failure_msg, exception_params_type('RCPT', l_reply.code, l_reply.text)));
+      end if;
 
       l_offset := l_comma_pos + 1;
     end loop;
@@ -3162,8 +3180,8 @@ create or replace package body logging is
     $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'l_reply.code: ' || l_reply.code); $end
 
     if l_reply.code <> 200 then
-      $IF $$debug $THEN internal_log(logging.c_error_level, l_intlogger, 'QUIT command failed'); $END
-      raise_application_error(-20002, 'quit smtp command failed');
+      $if $$debug $then internal_log(logging.c_error_level, l_intlogger, 'QUIT command failed'); $end
+      raise_application_error(c_smtp_failure_code, bind_params(c_smtp_failure_msg, exception_params_type('QUIT', l_reply.code, l_reply.text)));
     end if;
     $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'end'); $end
   end send_buffer;
