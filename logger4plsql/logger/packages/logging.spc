@@ -1,4 +1,4 @@
-create or replace package logger.logging is
+create or replace package logging is
   /**
   * Implementation of log4j for PL/SQL.
   * Licence: MIT License (@see license.txt)
@@ -120,6 +120,8 @@ create or replace package logger.logging is
   /** Type for logger parameters */
   type logger_type is record(
     always_from_ctx    ctx_boolean,
+    backtrace          boolean,
+    callstack          boolean,
     logger             t_logger.logger%type,
     log_level          t_logger.log_level%type,
     enabled_appenders  t_logger.appenders%type,
@@ -438,6 +440,30 @@ create or replace package logger.logging is
   procedure set_session_level(x_logger_name in t_logger.logger%type, x_log_level in t_logger.log_level%type);
 
   /**
+  * Procedure sets global flags for given logger.
+  * @param x_logger Logger name.
+  * @param x_additivity Additivity flag.
+  * @param x_backtrace Flag whether backtrace will be logged.
+  * @param x_callstack Flag whether callstack will be logged.    
+  */
+  procedure set_global_flags(x_logger_name in t_logger.logger%type,
+                             x_additivity  in boolean default null,
+                             x_backtrace   in boolean default null,
+                             x_callstack   in boolean default null);
+
+  /**
+  * Procedure sets session flags for given logger.
+  * @param x_logger Logger name.
+  * @param x_additivity Additivity flag.
+  * @param x_backtrace Flag whether backtrace will be logged.
+  * @param x_callstack Flag whether callstack will be logged.    
+  */
+  procedure set_session_flags(x_logger_name in t_logger.logger%type,
+                              x_additivity  in boolean default null,
+                              x_backtrace   in boolean default null,
+                              x_callstack   in boolean default null);
+
+  /**
   * Procedure adds given global appender to given logger and sets global additivity flag for the logger.
   * @param x_logger_name Logger name.
   * @param x_appender Appender code.
@@ -496,8 +522,8 @@ create or replace package logger.logging is
   procedure log(x_logger         in out nocopy logger_type,
                 x_log_level      in t_logger.log_level%type,
                 x_message        in message_type default sqlerrm,
-                x_log_backtrace  in boolean default true,
-                x_log_call_stack in boolean default true);
+                x_log_backtrace  in boolean default null,
+                x_log_call_stack in boolean default null);
 
 
   /**
@@ -509,8 +535,8 @@ create or replace package logger.logging is
   */
   procedure trace(x_logger         in out nocopy logger_type,
                   x_message        in message_type default sqlerrm,
-                  x_log_backtrace  in boolean default false,
-                  x_log_call_stack in boolean default true);
+                  x_log_backtrace  in boolean default null,
+                  x_log_call_stack in boolean default null);
 
   /**
   * Procedure logs message with INFO log level (according to the selection rule) for given logger.
@@ -521,8 +547,8 @@ create or replace package logger.logging is
   */
   procedure info(x_logger         in out nocopy logger_type,
                  x_message        in message_type default sqlerrm,
-                 x_log_backtrace  in boolean default false,
-                 x_log_call_stack in boolean default true);
+                 x_log_backtrace  in boolean default null,
+                 x_log_call_stack in boolean default null);
 
   /**
   * Procedure logs message with DEBUG log level (according to the selection rule) for given logger.
@@ -533,8 +559,8 @@ create or replace package logger.logging is
   */
   procedure debug(x_logger         in out nocopy logger_type,
                   x_message        in message_type default sqlerrm,
-                  x_log_backtrace  in boolean default false,
-                  x_log_call_stack in boolean default true);
+                  x_log_backtrace  in boolean default null,
+                  x_log_call_stack in boolean default null);
 
   /**
   * Procedure logs message with WARN log level (according to the selection rule) for given logger.
@@ -545,8 +571,8 @@ create or replace package logger.logging is
   */
   procedure warn(x_logger         in out nocopy logger_type,
                  x_message        in message_type default sqlerrm,
-                 x_log_backtrace  in boolean default true,
-                 x_log_call_stack in boolean default true);
+                 x_log_backtrace  in boolean default null,
+                 x_log_call_stack in boolean default null);
 
   /**
   * Procedure logs message with ERROR log level (according to the selection rule) for given logger.
@@ -557,8 +583,8 @@ create or replace package logger.logging is
   */
   procedure error(x_logger         in out nocopy logger_type,
                   x_message        in message_type default sqlerrm,
-                  x_log_backtrace  in boolean default true,
-                  x_log_call_stack in boolean default true);
+                  x_log_backtrace  in boolean default null,
+                  x_log_call_stack in boolean default null);
 
   /**
   * Procedure logs message with FATAL log level (according to the selection rule) for given logger.
@@ -569,8 +595,8 @@ create or replace package logger.logging is
   */
   procedure fatal(x_logger         in out nocopy logger_type,
                   x_message        in message_type default sqlerrm,
-                  x_log_backtrace  in boolean default true,
-                  x_log_call_stack in boolean default true);
+                  x_log_backtrace  in boolean default null,
+                  x_log_call_stack in boolean default null);
 
 
   /**
@@ -755,6 +781,20 @@ create or replace package logger.logging is
                                  x_log_level      in t_logger.log_level%type,
                                  x_setting_handle in pls_integer default 1);
 
+  /**
+  * Procedure sets flags for given logger in serialized settings.
+  * @param x_logger Logger name.
+  * @param x_additivity Additivity flag.
+  * @param x_backtrace Flag whether backtrace will be logged.
+  * @param x_callstack Flag whether callstack will be logged.    
+  * @param x_setting_handle A handle for settings. A handle represents a set of parameters.
+  */
+  procedure set_serialized_flags(x_logger_name    in t_logger.logger%type,
+                                 x_additivity     in boolean default null,
+                                 x_backtrace      in boolean default null,
+                                 x_callstack      in boolean default null,
+                                 x_setting_handle in pls_integer default 1);  
+  
   /**
   * Procedure sets session parameter value for given app and parameter name.
   * @param x_app Application.

@@ -4,6 +4,8 @@ create table t_logger
   log_level  number(5),
   appenders  number(10) default 0 not null,
   additivity number(1) default 1 not null,
+  backtrace  number(1) default 0 not null,
+  callstack  number(1) default 0 not null,
   constraint pk_logger primary key (logger)
 )
 organization index
@@ -32,3 +34,9 @@ comment on column t_logger.appenders
   is 'Appenders for logger. Binary coded (with OR)';
 comment on column t_logger.additivity
   is 'Additivity flag (cumulation of appenders) for logger';
+comment on column t_logger.backtrace
+  is 'Backtrace flag (logging backtrace) for logger';
+comment on column t_logger.callstack
+  is 'Callstack flag (logging callstack) for logger';
+
+
