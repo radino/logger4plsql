@@ -58,8 +58,7 @@ create or replace package logging is
   /** exeption code for failure in SMTP protokol */
   c_smtp_failure_code constant pls_integer := -20006;
   pragma exception_init(e_smtp_failure, -20006);
-
-
+ 
 
   /** Type for parameter names. */
   type param_names_type is table of user_objects.object_name%type;
@@ -180,10 +179,13 @@ create or replace package logging is
   -- internal debugger private methods
   $if $$debug $then
 
-  type logger_settings_type is record(
-    enabled_appenders t_logger.appenders%type,
-    log_level         t_logger.log_level%type,
-    additivity        t_logger.additivity%type);
+  type logger_settings_type is record (
+     enabled_appenders  t_logger.appenders%type,
+     log_level          t_logger.log_level%type,
+     additivity         t_logger.additivity%type,
+     backtrace          t_logger.backtrace%type,
+     callstack          t_logger.callstack%type
+  );
   type logger_settings_col_type is table of logger_settings_type index by t_logger.logger%type;
   type app_settings_type is record(
     app_params       appender_params_type,
@@ -218,7 +220,7 @@ create or replace package logging is
     return t_app_appender.parameter_value%type;
   function get_appenders(x_logger_name  in t_logger.logger%type,
                          x_app_ctx_name in ctx_namespace_type,
-                         x_add_ctx_name in ctx_namespace_type) return t_logger.appenders%type;
+                         x_flags_ctx_name in ctx_namespace_type) return t_logger.appenders%type;
   function get_current_appender_param(x_app            in t_app_appender.app%type,
                                       x_appender_code  in t_app_appender.appender_code%type,
                                       x_parameter_name in t_app_appender.parameter_name%type)

@@ -48,7 +48,7 @@ create or replace package body logging is
   c_no_such_appender_msg constant exception_msg_type := 'Appender with code %{1} does not exist.';
 
   /** exeption message for non-existing application. */ 
-  c_no_such_app_msg constant exception_msg_type := 'Application %{1} does not exist.';
+  c_no_such_app_msg constant exception_msg_type := 'Application %{1} does not exist. Review t_schema_app configuration table.';
 
   /** exeption message for non-existing handle. */ 
   c_no_such_handle_msg constant exception_msg_type := 'Handle %{1} does not exist.';
@@ -209,7 +209,7 @@ create or replace package body logging is
   g_root_logger_hash hash_type;
 
   /** A variable for builtding serialized settings */
-  g_serialized_settings deserialized_settings_col_type;
+  g_serialized_settings deserialized_settings_col_type := deserialized_settings_col_type();
 
   -- these elements are defined only if internal debugging is set to TRUE
   $if $$debug $then
@@ -1056,7 +1056,7 @@ create or replace package body logging is
         internal_log(logging.c_trace_level, l_intlogger, 'c_logger_names_ctx(x_visibility): ' || c_logger_names_ctx(x_visibility));
         internal_log(logging.c_trace_level, l_intlogger, 'c_logger_levels_ctx(x_visibility): ' || c_logger_levels_ctx(x_visibility));
         internal_log(logging.c_trace_level, l_intlogger, 'c_logger_appenders_ctx(x_visibility): ' || c_logger_appenders_ctx(x_visibility));
-        internal_log(logging.c_trace_level, l_intlogger, 'c_additivity_ctx(x_visibility): ' || c_additivity_ctx(x_visibility));
+        internal_log(logging.c_trace_level, l_intlogger, 'c_flags_ctx(x_visibility): ' || c_flags_ctx(x_visibility));
         internal_log(logging.c_trace_level, l_intlogger, 'l_row.logger: ' || l_row.logger);
         internal_log(logging.c_trace_level, l_intlogger, 'l_row.log_level: ' || l_row.log_level);
         internal_log(logging.c_trace_level, l_intlogger, 'l_row.appenders: ' || l_row.appenders);
@@ -1517,7 +1517,7 @@ create or replace package body logging is
   * Function returns binary encoded list of appenders for given logger.
   * @param x_logger_name Logger name.
   * @param x_app_ctx_name Name of a context containing appenders.
-  * @param x_flags_name Name of a context containing flags.
+  * @param x_flags_ctx_name Name of a context containing flags.
   * @return Binary encoded list of appenders for given logger.
   */
   function get_appenders(x_logger_name  in t_logger.logger%type,
@@ -1590,8 +1590,8 @@ create or replace package body logging is
                                 c_flags_ctx(c_session_flag));
     else
       l_result := get_appenders(x_logger_name,
-                               c_logger_appenders_ctx(c_global_flag),
-                               c_flags_ctx(c_global_flag));
+                                c_logger_appenders_ctx(c_global_flag),
+                                c_flags_ctx(c_global_flag));
     end if;
 
     $if $$debug $then
@@ -2412,9 +2412,10 @@ create or replace package body logging is
                    || g_serialized_settings(x_setting_handle).loggers(l_logger_name).log_level || c_ser_delim
                    || cast(
                         encode_flags(
-                          g_serialized_settings(x_setting_handle).loggers(l_logger_name).additivity,
+                          g_serialized_settings(x_setting_handle).loggers(l_logger_name).additivity, 
                           g_serialized_settings(x_setting_handle).loggers(l_logger_name).backtrace,
-                          g_serialized_settings(x_setting_handle).loggers(l_logger_name).callstack)
+                          g_serialized_settings(x_setting_handle).loggers(l_logger_name).callstack
+                        )
                       as varchar2) || c_ser_delim;
        l_logger_name := g_serialized_settings(x_setting_handle).loggers.next(l_logger_name);
     end loop;
@@ -2920,11 +2921,18 @@ create or replace package body logging is
     l_app := get_app(c_user);
     $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'l_app: ' || l_app); $end
 
-    select null
-      into l_dummy
-      from t_schema_app ua
-     where ua.schema = c_user
-       and ua.app = l_app;
+    begin
+      select null
+        into l_dummy
+        from t_schema_app ua
+       where ua.schema = c_user
+         and ua.app = l_app;
+    exception
+      when no_data_found then
+        $if $$debug $then internal_log(logging.c_error_level, l_intlogger, 'no such application for ' || c_user); $end
+        raise_application_error(c_no_such_app_code, bind_params(c_no_such_app_msg, exception_params_type(l_app)));
+    end;
+
 
     merge into t_logger l
     using (select null
@@ -3696,8 +3704,8 @@ create or replace package body logging is
     l_backtrace := coalesce(x_log_backtrace, x_logger.backtrace);
     l_callstack := coalesce(x_log_call_stack, x_logger.callstack);    
     $if $$debug $then
-      internal_log(logging.c_trace_level, l_intlogger, 'l_backtrace: ' || l_backtrace);
-      internal_log(logging.c_trace_level, l_intlogger, 'l_callstack: ' || l_callstack);
+      internal_log(logging.c_trace_level, l_intlogger, 'l_backtrace: ' || bool_to_int(l_backtrace));
+      internal_log(logging.c_trace_level, l_intlogger, 'l_callstack: ' || bool_to_int(l_callstack));
     $end
 
     $if dbms_db_version.version >= 11 $then pragma inline('bitand', 'YES'); $end
