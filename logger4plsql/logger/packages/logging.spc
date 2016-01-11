@@ -88,10 +88,10 @@ create or replace package logging is
   subtype ctx_boolean is varchar2(1);
 
   /** Constant for TRUE in a application context - application context can not handle booleans */
-  c_true constant ctx_boolean := 'T';
+  c_true constant ctx_boolean := '1';
 
   /** Constant for FALSE in a application context - application context can not handle booleans */
-  c_false constant ctx_boolean := 'F';
+  c_false constant ctx_boolean := '0';
 
   /** Constant indicating whether current database version is 11.2 or greater. */
   ver_lt_11_2 constant boolean := $if (dbms_db_version.version < 11) -- less than 11
