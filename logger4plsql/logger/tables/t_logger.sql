@@ -6,6 +6,7 @@ create table t_logger
   additivity number(1) default 1 not null,
   backtrace  number(1) default 0 not null,
   callstack  number(1) default 0 not null,
+  always_ctx NUMBER(1) default 0 not null,
   constraint pk_logger primary key (logger)
 )
 organization index
@@ -38,5 +39,5 @@ comment on column t_logger.backtrace
   is 'Backtrace flag (logging backtrace) for logger';
 comment on column t_logger.callstack
   is 'Callstack flag (logging callstack) for logger';
-
-
+comment on column t_logger.always_ctx
+  is 'Always from context flag for logger';

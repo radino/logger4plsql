@@ -93,6 +93,7 @@ create or replace package body logging is
   type logger_settings_type is record (
      enabled_appenders  t_logger.appenders%type,
      log_level          t_logger.log_level%type,
+     always_ctx         t_logger.always_ctx%type,
      additivity         t_logger.additivity%type,
      backtrace          t_logger.backtrace%type,
      callstack          t_logger.callstack%type
@@ -184,14 +185,17 @@ create or replace package body logging is
   /** Qualified name of this package. */
   c_package_name constant ctx_namespace_type := c_schema_name || '.' || $$PLSQL_UNIT;
   
+  /** Binary flag for reading configuration always from context. */
+  c_flag_always_ctx constant pls_integer := 1;
+
   /** Binary flag for additivity. */
-  c_flag_add constant pls_integer := 1;
+  c_flag_additivity constant pls_integer := 2;
 
   /** Binary flag for backtrace. */
-  c_flag_backtrace constant pls_integer := 2;
+  c_flag_backtrace constant pls_integer := 4;
 
   /** Binary flag for callstack. */
-  c_flag_callstack constant pls_integer := 4;
+  c_flag_callstack constant pls_integer := 8;
   
 
   /** Identifier for the session which consists of two componets:
@@ -683,12 +687,14 @@ create or replace package body logging is
 
   /**
   * Function encodes given flags to a binary number
+  * @param x_always_ctx Always from context flag.
   * @param x_additivity Additivity flag.
   * @param x_backtrace Backtrace flag.
   * @param x_callstack Callstack flag.
   * @return Binary encoded flags.
   */
-  function encode_flags(x_additivity in t_logger.additivity%type,
+  function encode_flags(x_always_ctx in t_logger.always_ctx%type,
+                        x_additivity in t_logger.additivity%type,
                         x_backtrace  in t_logger.backtrace%type,
                         x_callstack  in t_logger.callstack%type) return pls_integer is
     $if $$debug $then l_intlogger t_logger.logger%type := 'encode_flags'; $end
@@ -696,11 +702,13 @@ create or replace package body logging is
   begin
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
+      internal_log(logging.c_debug_level, l_intlogger, 'x_always_ctx: ' || x_always_ctx);
       internal_log(logging.c_debug_level, l_intlogger, 'x_additivity: ' || x_additivity);
       internal_log(logging.c_debug_level, l_intlogger, 'x_backtrace: ' || x_backtrace);
       internal_log(logging.c_debug_level, l_intlogger, 'x_callstack: ' || x_callstack);
     $end
-    l_result := nvl(x_additivity, 0) * c_flag_add + 
+    l_result := nvl(x_always_ctx, 0) * c_flag_always_ctx + 
+                nvl(x_additivity, 0) * c_flag_additivity + 
                 nvl(x_backtrace, 0)  * c_flag_backtrace +
                 nvl(x_callstack, 0)  * c_flag_callstack;
     $if $$debug $then
@@ -1048,7 +1056,7 @@ create or replace package body logging is
       return;
     end if;
 
-    for l_row in (select l.logger, l.log_level, l.appenders, l.additivity, l.backtrace, l.callstack
+    for l_row in (select l.logger, l.log_level, l.appenders, l.always_ctx, l.additivity, l.backtrace, l.callstack
                     from t_logger l
                    where l.logger like x_app || '.%' or x_app is null) loop
 
@@ -1060,6 +1068,7 @@ create or replace package body logging is
         internal_log(logging.c_trace_level, l_intlogger, 'l_row.logger: ' || l_row.logger);
         internal_log(logging.c_trace_level, l_intlogger, 'l_row.log_level: ' || l_row.log_level);
         internal_log(logging.c_trace_level, l_intlogger, 'l_row.appenders: ' || l_row.appenders);
+        internal_log(logging.c_trace_level, l_intlogger, 'l_row.always_ctx: ' || l_row.always_ctx);
         internal_log(logging.c_trace_level, l_intlogger, 'l_row.additivity: ' || l_row.additivity);
         internal_log(logging.c_trace_level, l_intlogger, 'l_row.backtrace: ' || l_row.backtrace);
         internal_log(logging.c_trace_level, l_intlogger, 'l_row.callstack: ' || l_row.callstack);
@@ -1072,7 +1081,7 @@ create or replace package body logging is
       set_context_rac_aware(c_logger_names_ctx(x_visibility), l_hlogger, l_row.logger, x_visibility);
       set_context_rac_aware(c_logger_levels_ctx(x_visibility), l_hlogger, l_row.log_level, x_visibility);
       set_context_rac_aware(c_logger_appenders_ctx(x_visibility), l_hlogger, l_row.appenders, x_visibility);
-      set_context_rac_aware(c_flags_ctx(x_visibility), l_hlogger, encode_flags(l_row.additivity, l_row.backtrace, l_row.callstack), x_visibility);
+      set_context_rac_aware(c_flags_ctx(x_visibility), l_hlogger, encode_flags(l_row.always_ctx, l_row.additivity, l_row.backtrace, l_row.callstack), x_visibility);
     end loop;
 
     $if dbms_db_version.version >= 11 $then pragma inline('set_initialization',  'YES'); $end
@@ -1548,7 +1557,7 @@ create or replace package body logging is
       $if dbms_db_version.version >= 11 $then pragma inline('bit_or',  'YES'); $end
       l_appenders := bit_or(l_appenders, nvl(sys_context(x_app_ctx_name, l_hlogger), 0));
 
-      if bitand(sys_context(x_flags_ctx_name, l_hlogger), c_flag_add) = 0 then
+      if bitand(sys_context(x_flags_ctx_name, l_hlogger), c_flag_additivity) = 0 then
         $if $$debug $then
           internal_log(logging.c_info_level, l_intlogger, 'stopping because of the additivity');
           internal_log(logging.c_debug_level, l_intlogger, 'l_appenders: ' || l_appenders);
@@ -1679,6 +1688,7 @@ create or replace package body logging is
     l_additivity t_logger.additivity%type;
     l_callstack  t_logger.callstack%type;
     l_backtrace  t_logger.backtrace%type;
+    l_always_ctx t_logger.always_ctx%type;
     l_flags      pls_integer;
   begin
     $if $$debug $then
@@ -1715,16 +1725,16 @@ create or replace package body logging is
     update t_logger l
        set l.appenders = bit_or(l.appenders, x_appender_code), l.additivity = l_additivity
      where l.logger = x_logger_name
-    returning appenders, backtrace, callstack into l_appenders, l_backtrace, l_callstack;
+    returning always_ctx, appenders, backtrace, callstack into l_always_ctx, l_appenders, l_backtrace, l_callstack;
 
     if sql%notfound then
       l_appenders := x_appender_code;
       $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'inserting a new row'); $end
       insert into t_logger
-        (logger, appenders, additivity, backtrace, callstack)
+        (logger, appenders, additivity, backtrace, callstack, always_ctx)
       values
-        (x_logger_name, l_appenders, l_additivity, default, default)
-      returning backtrace, callstack into l_backtrace, l_callstack;
+        (x_logger_name, l_appenders, l_additivity, default, default, default)
+      returning backtrace, callstack, always_ctx into l_backtrace, l_callstack, l_always_ctx;
     end if;
 
     $if dbms_db_version.version >= 11 $then pragma inline('hash_logger_name',  'YES'); $end
@@ -1737,9 +1747,10 @@ create or replace package body logging is
       internal_log(logging.c_trace_level, l_intlogger, 'l_additivity: ' || l_additivity);
       internal_log(logging.c_trace_level, l_intlogger, 'l_backtrace: ' || l_backtrace);
       internal_log(logging.c_trace_level, l_intlogger, 'l_callstack: ' || l_callstack);
+      internal_log(logging.c_trace_level, l_intlogger, 'l_always_ctx: ' || l_always_ctx);
     $end
     
-    l_flags := encode_flags(l_additivity, l_backtrace, l_callstack);
+    l_flags := encode_flags(l_always_ctx, l_additivity, l_backtrace, l_callstack);
     
     set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name, c_global_flag);
     set_context_rac_aware(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders, c_global_flag);
@@ -1765,6 +1776,7 @@ create or replace package body logging is
     l_additivity t_logger.additivity%type;
     l_callstack  t_logger.callstack%type;
     l_backtrace  t_logger.backtrace%type;
+    l_always_ctx  t_logger.always_ctx%type;
     l_flags      pls_integer;
   begin
     $if $$debug $then
@@ -1798,22 +1810,23 @@ create or replace package body logging is
     update t_logger l
        set l.additivity = l_additivity
      where l.logger = x_logger_name
-    returning appenders, backtrace, callstack into l_appenders, l_backtrace, l_callstack;
+    returning appenders, backtrace, callstack, always_ctx into l_appenders, l_backtrace, l_callstack, l_always_ctx;
 
     if sql%notfound then
       l_appenders := 0;
       $if $$debug $then internal_log(logging.c_info_level, l_intlogger, 'creating a new row'); $end
       insert into t_logger
-        (logger, appenders, additivity, backtrace, callstack)
+        (logger, appenders, additivity, backtrace, callstack, always_ctx)
       values
-        (x_logger_name, l_appenders, l_additivity, default, default)
-      returning backtrace, callstack into l_backtrace, l_callstack;
+        (x_logger_name, l_appenders, l_additivity, default, default, default)
+      returning backtrace, callstack, always_ctx into l_backtrace, l_callstack, l_always_ctx;
     end if;
 
     $if $$debug $then
       internal_log(logging.c_trace_level, l_intlogger, 'l_appenders: ' || l_appenders);
       internal_log(logging.c_trace_level, l_intlogger, 'l_backtrace: ' || l_backtrace);
       internal_log(logging.c_trace_level, l_intlogger, 'l_callstack: ' || l_callstack);
+      internal_log(logging.c_trace_level, l_intlogger, 'l_always_ctx: ' || l_always_ctx);
     $end
 
     $if dbms_db_version.version >= 11 $then pragma inline('hash_logger_name',  'YES'); $end
@@ -1824,7 +1837,7 @@ create or replace package body logging is
       internal_log(logging.c_debug_level, l_intlogger, 'l_additivity: ' || l_appenders);
     $end
     
-    l_flags := encode_flags(l_additivity, l_backtrace, l_callstack);
+    l_flags := encode_flags(l_always_ctx, l_additivity, l_backtrace, l_callstack);
 
     set_context_rac_aware(c_logger_names_ctx(c_global_flag), l_hlogger, x_logger_name, c_global_flag);
     set_context_rac_aware(c_logger_appenders_ctx(c_global_flag), l_hlogger, l_appenders, c_global_flag);
@@ -1942,7 +1955,7 @@ create or replace package body logging is
     $end
     $if dbms_db_version.version >= 11 $then pragma inline('bit_or',  'YES'); $end
     l_appenders := bit_or(l_appenders, x_appender_code);
-    l_flags := bit_or(l_flags, bool_to_int(x_additivity) * c_flag_add);
+    l_flags := bit_or(l_flags, bool_to_int(x_additivity) * c_flag_additivity);
     $if $$debug $then 
       internal_log(logging.c_trace_level, l_intlogger, 'l_appenders: ' || l_appenders); 
       internal_log(logging.c_trace_level, l_intlogger, 'l_flags: ' || l_flags);
@@ -1981,7 +1994,7 @@ create or replace package body logging is
       internal_log(logging.c_trace_level, l_intlogger, 'l_appenders: ' || l_appenders);
       internal_log(logging.c_trace_level, l_intlogger, 'l_flags: ' || l_flags);
     $end
-    l_flags := bit_or(l_flags, bool_to_int(x_additivity) * c_flag_add);
+    l_flags := bit_or(l_flags, bool_to_int(x_additivity) * c_flag_additivity);
     $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'l_flags: ' || l_flags); $end
     
     set_context_rac_aware(c_logger_names_ctx(c_session_flag), l_hlogger, x_logger_name, c_session_flag);
@@ -2412,6 +2425,7 @@ create or replace package body logging is
                    || g_serialized_settings(x_setting_handle).loggers(l_logger_name).log_level || c_ser_delim
                    || cast(
                         encode_flags(
+                          g_serialized_settings(x_setting_handle).loggers(l_logger_name).always_ctx, 
                           g_serialized_settings(x_setting_handle).loggers(l_logger_name).additivity, 
                           g_serialized_settings(x_setting_handle).loggers(l_logger_name).backtrace,
                           g_serialized_settings(x_setting_handle).loggers(l_logger_name).callstack
@@ -2524,7 +2538,7 @@ create or replace package body logging is
         end if;
         if l_flags is not null then
           set_serialized_flags(x_logger_name => l_logger,
-                               x_additivity => bitand(l_flags, c_flag_add) > 0,
+                               x_additivity => bitand(l_flags, c_flag_additivity) > 0,
                                x_backtrace => bitand(l_flags, c_flag_backtrace) > 0,
                                x_callstack => bitand(l_flags, c_flag_callstack) > 0,
                                x_setting_handle => l_handle);
@@ -2773,11 +2787,13 @@ create or replace package body logging is
   /**
   * Procedure sets global flags for given logger.
   * @param x_logger Logger name.
+  * @param x_always_ctx Flag whether configuration is supposed to be always obtained from the context.
   * @param x_additivity Additivity flag.
   * @param x_backtrace Flag whether backtrace will be logged.
   * @param x_callstack Flag whether callstack will be logged.    
   */
   procedure set_global_flags(x_logger_name in t_logger.logger%type,
+                             x_always_ctx  in boolean default null,
                              x_additivity  in boolean default null,
                              x_backtrace   in boolean default null,
                              x_callstack   in boolean default null) is
@@ -2786,6 +2802,7 @@ create or replace package body logging is
     l_app        t_schema_app.app%type;
     l_flags      pls_integer;
     l_additivity pls_integer;
+    l_always_ctx pls_integer;
     l_backtrace  pls_integer;
     l_callstack  pls_integer;
     l_dummy      varchar2(1);
@@ -2795,6 +2812,7 @@ create or replace package body logging is
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name);
       internal_log(logging.c_debug_level, l_intlogger, 'x_additivity: ' || bool_to_int(x_additivity));
+      internal_log(logging.c_debug_level, l_intlogger, 'x_always_ctx: ' || bool_to_int(x_always_ctx));
       internal_log(logging.c_debug_level, l_intlogger, 'x_backtrace: ' || bool_to_int(x_backtrace));
       internal_log(logging.c_debug_level, l_intlogger, 'x_callstack: ' || bool_to_int(x_callstack));      
     $end
@@ -2812,16 +2830,18 @@ create or replace package body logging is
     l_additivity := bool_to_int(x_additivity);
     l_backtrace := bool_to_int(x_backtrace);
     l_callstack := bool_to_int(x_callstack);
+    l_always_ctx := bool_to_int(x_always_ctx);
     
     update t_logger l
        set l.additivity = coalesce(l_additivity, l.additivity),
            l.backtrace = coalesce(l_backtrace, l.backtrace),
-           l.callstack = coalesce(l_callstack, l.callstack)
+           l.callstack = coalesce(l_callstack, l.callstack),
+           l.always_ctx = coalesce(l_always_ctx, l.always_ctx)
      where l.logger = x_logger_name;
 
     if sql%notfound then 
-      insert into t_logger(logger, log_level, appenders, additivity, backtrace, callstack)
-        values (x_logger_name, null, null, l_additivity, l_backtrace, l_callstack);
+      insert into t_logger(logger, log_level, appenders, additivity, backtrace, callstack, always_ctx)
+        values (x_logger_name, null, null, l_additivity, l_backtrace, l_callstack, l_always_ctx);
       $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'new row inserted'); $end
     else
       $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'row updated'); $end
@@ -2829,7 +2849,7 @@ create or replace package body logging is
     end if;
 
     $if dbms_db_version.version >= 11 $then pragma inline('hash_logger_name',  'YES'); $end
-    l_flags := encode_flags(l_additivity, l_backtrace, l_callstack);
+    l_flags := encode_flags(l_always_ctx, l_additivity, l_backtrace, l_callstack);
     l_hlogger := hash_logger_name(x_logger_name);
     $if $$debug $then 
       internal_log(logging.c_trace_level, l_intlogger, 'l_hlogger: ' || l_hlogger);
@@ -2845,11 +2865,13 @@ create or replace package body logging is
   /**
   * Procedure sets session flags for given logger.
   * @param x_logger Logger name.
+  * @param x_always_ctx Flag whether configuration is taken always from context.
   * @param x_additivity Additivity flag.
   * @param x_backtrace Flag whether backtrace will be logged.
   * @param x_callstack Flag whether callstack will be logged.    
   */
   procedure set_session_flags(x_logger_name in t_logger.logger%type,
+                              x_always_ctx  in boolean default null,
                               x_additivity  in boolean default null,
                               x_backtrace   in boolean default null,
                               x_callstack   in boolean default null) is
@@ -2857,6 +2879,7 @@ create or replace package body logging is
     pragma autonomous_transaction;
     l_app        t_schema_app.app%type;
     l_flags      pls_integer;
+    l_always_ctx pls_integer;
     l_additivity pls_integer;
     l_backtrace  pls_integer;
     l_callstack  pls_integer;
@@ -2866,6 +2889,7 @@ create or replace package body logging is
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger_name: ' || x_logger_name);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_always_ctx: ' || bool_to_int(x_always_ctx));
       internal_log(logging.c_debug_level, l_intlogger, 'x_additivity: ' || bool_to_int(x_additivity));
       internal_log(logging.c_debug_level, l_intlogger, 'x_backtrace: ' || bool_to_int(x_backtrace));
       internal_log(logging.c_debug_level, l_intlogger, 'x_callstack: ' || bool_to_int(x_callstack));      
@@ -2881,12 +2905,13 @@ create or replace package body logging is
      where ua.schema = c_user
        and ua.app = l_app;
 
+    l_always_ctx := bool_to_int(x_always_ctx);
     l_additivity := bool_to_int(x_additivity);
     l_backtrace := bool_to_int(x_backtrace);
     l_callstack := bool_to_int(x_callstack);
     
     $if dbms_db_version.version >= 11 $then pragma inline('hash_logger_name',  'YES'); $end
-    l_flags := encode_flags(l_additivity, l_backtrace, l_callstack);
+    l_flags := encode_flags(l_always_ctx, l_additivity, l_backtrace, l_callstack);
     l_hlogger := hash_logger_name(x_logger_name);
     $if $$debug $then 
       internal_log(logging.c_trace_level, l_intlogger, 'l_hlogger: ' || l_hlogger);
@@ -3221,31 +3246,46 @@ create or replace package body logging is
   /**
   * Returns a logger configuration for given method.
   * @param x_method Name of method.
-  * @param x_always_from_ctx Flag whether the configuration is always obtained
-  *                          from application context.
   * @return Logger configuration.
   */
-  function get_logger(x_method          in varchar2 default null,
-                      x_always_from_ctx in ctx_boolean default c_false) return logger_type is
+  function get_logger(x_method          in varchar2 default null) return logger_type is
     $if $$debug $then l_intlogger t_logger.logger%type := 'get_logger'; $end
     l_logger       logger_type;
+    l_flags        pls_integer;
   begin
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_method: ' || x_method);
-      internal_log(logging.c_debug_level, l_intlogger, 'x_always_from_ctx: ' || x_always_from_ctx);
     $end
 
     $if dbms_db_version.version >= 11 $then pragma inline('parse_stack',  'YES'); $end
     parse_stack(l_logger.logger, l_logger.app, x_method);
-    l_logger.always_from_ctx := x_always_from_ctx;
+
+    $if $$debug $then
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.logger: ' || l_logger.logger);
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.app: ' || l_logger.app);
+    $end
+    
+    $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_flags',  'YES'); $end
+    l_flags := get_current_used_flags(l_logger.logger);
+    l_logger.always_from_ctx := bitand(l_flags, c_flag_always_ctx) > 0;
+    l_logger.backtrace := bitand(l_flags, c_flag_backtrace) > 0;
+    l_logger.callstack := bitand(l_flags, c_flag_callstack) > 0;
+    l_logger.additivity := bitand(l_flags, c_flag_additivity) > 0;
+
+    $if $$debug $then
+      internal_log(logging.c_debug_level, l_intlogger, 'l_flags: ' || l_flags);
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.always_from_ctx: ' || bool_to_int(l_logger.always_from_ctx));
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.backtrace: ' ||  bool_to_int(l_logger.backtrace));
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.callstack: ' ||  bool_to_int(l_logger.callstack));
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.additivity: ' ||  bool_to_int(l_logger.additivity));
+    $end
 
     l_logger.log_level := get_current_used_level(l_logger.logger);
     $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_appenders',  'YES'); $end
     l_logger.enabled_appenders  := get_current_used_appenders(l_logger.logger);
 
     $if $$debug $then
-      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.always_from_ctx: ' || l_logger.always_from_ctx);
       internal_log(logging.c_debug_level, l_intlogger, 'l_logger.log_level_severity: ' || l_logger.log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'l_logger.enabled_appenders: ' || l_logger.enabled_appenders);
       internal_log(logging.c_info_level, l_intlogger, 'end');
@@ -3255,23 +3295,35 @@ create or replace package body logging is
 
   /**
   * Returns the root logger configuration.
-  * @param x_always_from_ctx Flag whether the configuration is always obtained
-  *                          from application context.
   * @return Logger configuration.
   */
-  function get_root_logger(x_always_from_ctx in ctx_boolean default c_false) return logger_type is
+  function get_root_logger return logger_type is
     $if $$debug $then l_intlogger t_logger.logger%type := 'get_root_logger'; $end
     l_logger logger_type;
+    l_flags pls_integer;
   begin
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
-      internal_log(logging.c_debug_level, l_intlogger, 'x_always_from_ctx: ' || x_always_from_ctx);
     $end
 
     $if dbms_db_version.version >= 11 $then pragma inline('parse_stack',  'YES'); $end
     parse_stack(l_logger.logger, l_logger.app);
     l_logger.logger          := c_root_logger_name;
-    l_logger.always_from_ctx := x_always_from_ctx;
+
+    $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_flags',  'YES'); $end
+    l_flags := get_current_used_flags(l_logger.logger);
+    l_logger.always_from_ctx := bitand(l_flags, c_flag_always_ctx) > 0;
+    l_logger.backtrace := bitand(l_flags, c_flag_backtrace) > 0;
+    l_logger.callstack := bitand(l_flags, c_flag_callstack) > 0;
+    l_logger.additivity := bitand(l_flags, c_flag_additivity) > 0;
+
+    $if $$debug $then
+      internal_log(logging.c_debug_level, l_intlogger, 'l_flags: ' || l_flags);
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.always_from_ctx: ' || bool_to_int(l_logger.always_from_ctx));
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.backtrace: ' ||  bool_to_int(l_logger.backtrace));
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.callstack: ' ||  bool_to_int(l_logger.callstack));
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.additivity: ' ||  bool_to_int(l_logger.additivity));
+    $end
 
     $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_level',  'YES'); $end
     l_logger.log_level := get_current_used_level(l_logger.logger);
@@ -3287,23 +3339,35 @@ create or replace package body logging is
 
   /**
   * Returns the application logger configuration.
-  * @param x_always_from_ctx Flag whether the configuration is always obtained
-  *                          from application context.
   * @return Logger configuration.
   */
-  function get_app_logger(x_always_from_ctx in ctx_boolean default c_false) return logger_type is
+  function get_app_logger return logger_type is
     $if $$debug $then l_intlogger t_logger.logger%type := 'get_app_logger'; $end
     l_logger logger_type;
+    l_flags pls_integer;
   begin
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
-      internal_log(logging.c_debug_level, l_intlogger, 'x_always_from_ctx: ' || x_always_from_ctx);
     $end
     $if dbms_db_version.version >= 11 $then pragma inline('parse_stack',  'YES'); $end
     parse_stack(l_logger.logger, l_logger.app);
     l_logger.logger          := l_logger.app;
-    l_logger.always_from_ctx := x_always_from_ctx;
     $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'l_logger.logger: ' || l_logger.logger); $end
+
+    $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_flags',  'YES'); $end
+    l_flags := get_current_used_flags(l_logger.logger);
+    l_logger.always_from_ctx := bitand(l_flags, c_flag_always_ctx) > 0;
+    l_logger.backtrace := bitand(l_flags, c_flag_backtrace) > 0;
+    l_logger.callstack := bitand(l_flags, c_flag_callstack) > 0;
+    l_logger.additivity := bitand(l_flags, c_flag_additivity) > 0;
+
+    $if $$debug $then
+      internal_log(logging.c_debug_level, l_intlogger, 'l_flags: ' || l_flags);
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.always_from_ctx: ' || bool_to_int(l_logger.always_from_ctx));
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.backtrace: ' ||  bool_to_int(l_logger.backtrace));
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.callstack: ' ||  bool_to_int(l_logger.callstack));
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.additivity: ' ||  bool_to_int(l_logger.additivity));
+    $end
 
     $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_level',  'YES'); $end
     l_logger.log_level := get_current_used_level(l_logger.logger);
@@ -3319,22 +3383,35 @@ create or replace package body logging is
 
   /**
   * Returns the schema logger configuration.
-  * @param x_always_from_ctx Flag whether the configuration is always obtained
-  *                          from application context.
   * @return Logger configuration.
   */
-  function get_schema_logger(x_always_from_ctx in ctx_boolean default c_false) return logger_type is
+  function get_schema_logger return logger_type is
     $if $$debug $then l_intlogger t_logger.logger%type := 'get_schema_logger'; $end
     l_logger logger_type;
+    l_flags pls_integer;
   begin
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
-      internal_log(logging.c_debug_level, l_intlogger, 'x_always_from_ctx: ' || x_always_from_ctx);
     $end
     $if dbms_db_version.version >= 11 $then pragma inline('parse_stack',  'YES'); $end
     parse_stack(l_logger.logger, l_logger.app);
     l_logger.logger          := l_logger.app || '.' || c_user;
-    l_logger.always_from_ctx := x_always_from_ctx;
+
+    $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_flags',  'YES'); $end
+    l_flags := get_current_used_flags(l_logger.logger);
+    l_logger.always_from_ctx := bitand(l_flags, c_flag_always_ctx) > 0;
+    l_logger.backtrace := bitand(l_flags, c_flag_backtrace) > 0;
+    l_logger.callstack := bitand(l_flags, c_flag_callstack) > 0;
+    l_logger.additivity := bitand(l_flags, c_flag_additivity) > 0;
+
+    $if $$debug $then
+      internal_log(logging.c_debug_level, l_intlogger, 'l_flags: ' || l_flags);
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.always_from_ctx: ' || bool_to_int(l_logger.always_from_ctx));
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.backtrace: ' ||  bool_to_int(l_logger.backtrace));
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.callstack: ' ||  bool_to_int(l_logger.callstack));
+      internal_log(logging.c_debug_level, l_intlogger, 'l_logger.additivity: ' ||  bool_to_int(l_logger.additivity));
+    $end
+    
     $if $$debug $then internal_log(logging.c_debug_level, l_intlogger, 'l_logger.logger: ' || l_logger.logger); $end
     $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_level',  'YES'); $end
     l_logger.log_level := get_current_used_level(l_logger.logger);
@@ -3665,7 +3742,7 @@ create or replace package body logging is
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.logger: ' || x_logger.logger);
-      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || x_logger.always_from_ctx);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || bool_to_int(x_logger.always_from_ctx));
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.app: ' || x_logger.app);
@@ -3675,7 +3752,7 @@ create or replace package body logging is
       internal_log(logging.c_debug_level, l_intlogger, 'x_log_backtrace: ' || bool_to_int(x_log_backtrace));
     $end
 
-    if x_logger.always_from_ctx = c_true then
+    if x_logger.always_from_ctx then
       -- check whether custom session settings has been requested, if yes, use them
       $if dbms_db_version.version >= 11 $then pragma inline('use_requested_session_settings',  'YES'); $end
       use_requested_session_settings(x_logger.app);
@@ -3689,7 +3766,7 @@ create or replace package body logging is
       return;
     end if;
 
-    if x_logger.always_from_ctx = c_true then
+    if x_logger.always_from_ctx then
       $if dbms_db_version.version >= 11 $then pragma inline('get_current_used_appenders',  'YES'); $end
       x_logger.enabled_appenders := get_current_used_appenders(x_logger.logger);
       $if $$debug $then internal_log(logging.c_trace_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders); $end
@@ -3845,14 +3922,14 @@ create or replace package body logging is
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.logger: ' || x_logger.logger);
-      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || x_logger.always_from_ctx);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || bool_to_int(x_logger.always_from_ctx));
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.app: ' || x_logger.app);
       internal_log(logging.c_debug_level, l_intlogger, 'x_log_level: ' || x_log_level);
     $end
 
-    if x_logger.always_from_ctx = c_true then
+    if x_logger.always_from_ctx then
       -- check whether custom session settings has been requested, if yes, use them
       $if dbms_db_version.version >= 11 $then pragma inline('use_requested_session_settings',  'YES'); $end
       use_requested_session_settings(x_logger.app);
@@ -3878,13 +3955,13 @@ create or replace package body logging is
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.logger: ' || x_logger.logger);
-      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || x_logger.always_from_ctx);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || bool_to_int(x_logger.always_from_ctx));
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.app: ' || x_logger.app);
     $end
 
-    if x_logger.always_from_ctx = c_true then
+    if x_logger.always_from_ctx then
       -- check whether custom session settings has been requested, if yes, use them
       $if dbms_db_version.version >= 11 $then pragma inline('use_requested_session_settings',  'YES'); $end
       use_requested_session_settings(x_logger.app);
@@ -3909,13 +3986,13 @@ create or replace package body logging is
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.logger: ' || x_logger.logger);
-      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || x_logger.always_from_ctx);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || bool_to_int(x_logger.always_from_ctx));
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.app: ' || x_logger.app);
     $end
 
-    if x_logger.always_from_ctx = c_true then
+    if x_logger.always_from_ctx then
       -- check whether custom session settings has been requested, if yes, use them
       $if dbms_db_version.version >= 11 $then pragma inline('use_requested_session_settings',  'YES'); $end
       use_requested_session_settings(x_logger.app);
@@ -3941,13 +4018,13 @@ create or replace package body logging is
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.logger: ' || x_logger.logger);
-      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || x_logger.always_from_ctx);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || bool_to_int(x_logger.always_from_ctx));
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.app: ' || x_logger.app);
     $end
 
-    if x_logger.always_from_ctx = c_true then
+    if x_logger.always_from_ctx then
       -- check whether custom session settings has been requested, if yes, use them
       $if dbms_db_version.version >= 11 $then pragma inline('use_requested_session_settings',  'YES'); $end
       use_requested_session_settings(x_logger.app);
@@ -3973,13 +4050,13 @@ create or replace package body logging is
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.logger: ' || x_logger.logger);
-      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || x_logger.always_from_ctx);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || bool_to_int(x_logger.always_from_ctx));
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.app: ' || x_logger.app);
     $end
 
-    if x_logger.always_from_ctx = c_true then
+    if x_logger.always_from_ctx then
       -- check whether custom session settings has been requested, if yes, use them
       $if dbms_db_version.version >= 11 $then pragma inline('use_requested_session_settings',  'YES'); $end
       use_requested_session_settings(x_logger.app);
@@ -4005,13 +4082,13 @@ create or replace package body logging is
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.logger: ' || x_logger.logger);
-      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || x_logger.always_from_ctx);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || bool_to_int(x_logger.always_from_ctx));
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.app: ' || x_logger.app);
     $end
 
-    if x_logger.always_from_ctx = c_true then
+    if x_logger.always_from_ctx then
       -- check whether custom session settings has been requested, if yes, use them
       $if dbms_db_version.version >= 11 $then pragma inline('use_requested_session_settings',  'YES'); $end
       use_requested_session_settings(x_logger.app);
@@ -4037,13 +4114,13 @@ create or replace package body logging is
     $if $$debug $then
       internal_log(logging.c_info_level, l_intlogger, 'start');
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.logger: ' || x_logger.logger);
-      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || x_logger.always_from_ctx);
+      internal_log(logging.c_debug_level, l_intlogger, 'x_logger.always_from_ctx: ' || bool_to_int(x_logger.always_from_ctx));
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.log_level_severity: ' || x_logger.log_level);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.enabled_appenders: ' || x_logger.enabled_appenders);
       internal_log(logging.c_debug_level, l_intlogger, 'x_logger.app: ' || x_logger.app);
     $end
 
-    if x_logger.always_from_ctx = c_true then
+    if x_logger.always_from_ctx then
       -- check whether custom session settings has been requested, if yes, use them
       $if dbms_db_version.version >= 11 $then pragma inline('use_requested_session_settings',  'YES'); $end
       use_requested_session_settings(x_logger.app);

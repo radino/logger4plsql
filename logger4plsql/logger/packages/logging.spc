@@ -84,15 +84,6 @@ create or replace package logging is
   /** Type for appender settings. */
   type appender_params_type is table of t_app_appender.parameter_value%type index by t_app_appender.parameter_name%type;
 
-  /** Type for context "boolean" */
-  subtype ctx_boolean is varchar2(1);
-
-  /** Constant for TRUE in a application context - application context can not handle booleans */
-  c_true constant ctx_boolean := '1';
-
-  /** Constant for FALSE in a application context - application context can not handle booleans */
-  c_false constant ctx_boolean := '0';
-
   /** Constant indicating whether current database version is 11.2 or greater. */
   ver_lt_11_2 constant boolean := $if (dbms_db_version.version < 11) -- less than 11
            or (dbms_db_version.version = 11 and dbms_db_version.release < 2) -- or less than 11.2
@@ -118,9 +109,10 @@ create or replace package logging is
 
   /** Type for logger parameters */
   type logger_type is record(
-    always_from_ctx    ctx_boolean,
+    always_from_ctx    boolean,
     backtrace          boolean,
     callstack          boolean,
+    additivity          boolean,
     logger             t_logger.logger%type,
     log_level          t_logger.log_level%type,
     enabled_appenders  t_logger.appenders%type,
@@ -182,6 +174,7 @@ create or replace package logging is
   type logger_settings_type is record (
      enabled_appenders  t_logger.appenders%type,
      log_level          t_logger.log_level%type,
+     always_ctx         t_logger.always_ctx%type,
      additivity         t_logger.additivity%type,
      backtrace          t_logger.backtrace%type,
      callstack          t_logger.callstack%type
@@ -318,36 +311,28 @@ create or replace package logging is
   /**
   * Returns a logger configuration for given method.
   * @param x_method Name of method.
-  * @param x_always_from_ctx Flag whether the configuration is always obtained
-  *                          from application context.
   * @return Logger configuration.
   */
-  function get_logger(x_method in varchar2 default null, x_always_from_ctx in ctx_boolean default c_false)
+  function get_logger(x_method in varchar2 default null)
     return logger_type;
 
   /**
   * Returns the root logger configuration.
-  * @param x_always_from_ctx Flag whether the configuration is always obtained
-  *                          from application context.
   * @return Logger configuration.
   */
-  function get_root_logger(x_always_from_ctx in ctx_boolean default c_false) return logger_type;
+  function get_root_logger return logger_type;
 
   /**
   * Returns the application logger configuration.
-  * @param x_always_from_ctx Flag whether the configuration is always obtained
-  *                          from application context.
   * @return Logger configuration.
   */
-  function get_app_logger(x_always_from_ctx in ctx_boolean default c_false) return logger_type;
+  function get_app_logger return logger_type;
 
   /**
   * Returns the schema logger configuration.
-  * @param x_always_from_ctx Flag whether the configuration is always obtained
-  *                          from application context.
   * @return Logger configuration.
   */
-  function get_schema_logger(x_always_from_ctx in ctx_boolean default c_false) return logger_type;
+  function get_schema_logger return logger_type;
 
   /**
   * Procedure adds given schema to given application.
@@ -444,27 +429,29 @@ create or replace package logging is
   /**
   * Procedure sets global flags for given logger.
   * @param x_logger Logger name.
+  * @param x_always_ctx Flag whether configuration is supposed to be always obtained from the context.
   * @param x_additivity Additivity flag.
   * @param x_backtrace Flag whether backtrace will be logged.
   * @param x_callstack Flag whether callstack will be logged.    
   */
   procedure set_global_flags(x_logger_name in t_logger.logger%type,
+                             x_always_ctx  in boolean default null,
                              x_additivity  in boolean default null,
                              x_backtrace   in boolean default null,
                              x_callstack   in boolean default null);
-
   /**
   * Procedure sets session flags for given logger.
   * @param x_logger Logger name.
+  * @param x_always_ctx Flag whether configuration is taken always from context.
   * @param x_additivity Additivity flag.
   * @param x_backtrace Flag whether backtrace will be logged.
   * @param x_callstack Flag whether callstack will be logged.    
   */
   procedure set_session_flags(x_logger_name in t_logger.logger%type,
+                              x_always_ctx  in boolean default null,
                               x_additivity  in boolean default null,
                               x_backtrace   in boolean default null,
                               x_callstack   in boolean default null);
-
   /**
   * Procedure adds given global appender to given logger and sets global additivity flag for the logger.
   * @param x_logger_name Logger name.
